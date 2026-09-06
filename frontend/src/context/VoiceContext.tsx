@@ -33,7 +33,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const isPausedRef = useRef<boolean>(false);
   const isSpeakingRef = useRef<boolean>(false);
   const restartTimeoutRef = useRef<any>(null);
-  const speechDoneTimeoutRef = useRef<any>(null);
+  const speakingSafetyTimeoutRef = useRef<any>(null);
   const lastCmdTimeRef = useRef<number>(0);
   const navigate = useNavigate();
 
@@ -41,7 +41,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     isVoiceActiveRef.current = isVoiceActive;
   }, [isVoiceActive]);
 
-  // Audio tone feedback using Web Audio API ("make noise")
+  // Audio tone feedback using Web Audio API ("make noise" - instant & 100% reliable)
   const playTone = (freq = 480, duration = 0.15) => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -65,7 +65,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  // Vocal spoken confirmation with strict self-echo suppression
+  // Vocal spoken confirmation with non-blocking safety timer & self-echo suppression
   const speakText = (text: string, lang = 'en-US', onComplete?: () => void) => {
     try {
       if (!('speechSynthesis' in window)) {
@@ -73,36 +73,61 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return;
       }
 
-      if (speechDoneTimeoutRef.current) {
-        clearTimeout(speechDoneTimeoutRef.current);
+      if (speakingSafetyTimeoutRef.current) {
+        clearTimeout(speakingSafetyTimeoutRef.current);
       }
 
       isSpeakingRef.current = true;
-      window.speechSynthesis.cancel();
 
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = lang;
-      utterance.rate = 1.0;
+      // Calculate approximate speech duration (words * 320ms, min 1s, max 4s)
+      const wordCount = text.split(/\s+/).length;
+      const safeDuration = Math.max(1000, Math.min(4000, wordCount * 320));
 
-      const voices = window.speechSynthesis.getVoices();
-      const matched = voices.find((v) =>
-        lang.startsWith('hi')
-          ? v.lang.toLowerCase().includes('hi') || v.name.toLowerCase().includes('hindi')
-          : v.lang.toLowerCase().includes('en')
-      );
-      if (matched) utterance.voice = matched;
-
-      const finishSpeech = () => {
-        speechDoneTimeoutRef.current = setTimeout(() => {
-          isSpeakingRef.current = false;
-          onComplete?.();
-        }, 400); // 400ms buffer for acoustic room echo dissipation
+      let hasCompleted = false;
+      const safeComplete = () => {
+        if (hasCompleted) return;
+        hasCompleted = true;
+        isSpeakingRef.current = false;
+        onComplete?.();
       };
 
-      utterance.onend = finishSpeech;
-      utterance.onerror = finishSpeech;
+      // Guaranteed safety timeout: NEVER allow isSpeaking to stay stuck
+      speakingSafetyTimeoutRef.current = setTimeout(safeComplete, safeDuration);
 
-      window.speechSynthesis.speak(utterance);
+      // In Chrome: unpause synthesizer and add small tick before speaking
+      try {
+        window.speechSynthesis.resume();
+        window.speechSynthesis.cancel();
+
+        setTimeout(() => {
+          try {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = lang;
+            utterance.rate = 1.05;
+
+            const voices = window.speechSynthesis.getVoices();
+            const matched = voices.find((v) =>
+              lang.startsWith('hi')
+                ? v.lang.toLowerCase().includes('hi') || v.name.toLowerCase().includes('hindi')
+                : v.lang.toLowerCase().includes('en')
+            );
+            if (matched) utterance.voice = matched;
+
+            utterance.onend = () => {
+              setTimeout(safeComplete, 200);
+            };
+            utterance.onerror = () => {
+              safeComplete();
+            };
+
+            window.speechSynthesis.speak(utterance);
+          } catch (e) {
+            safeComplete();
+          }
+        }, 40);
+      } catch (e) {
+        safeComplete();
+      }
     } catch (e) {
       console.warn('Speech synthesis error', e);
       isSpeakingRef.current = false;
@@ -121,11 +146,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!phrase) return false;
 
     const now = Date.now();
-    if (now - lastCmdTimeRef.current < 1100) {
-      return false; // Debounce rapid multi-token matches within 1.1s
+    if (now - lastCmdTimeRef.current < 900) {
+      return false; // Debounce rapid multi-token matches
     }
 
-    console.log('[Voice Command Processed]:', phrase);
+    console.log('[Voice Recognized]:', phrase);
 
     // 1. Courses Navigation
     if (
@@ -134,6 +159,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       phrase.includes('syllabus') ||
       phrase.includes('catalogue') ||
       phrase.includes('catalog') ||
+      phrase.includes('curriculum') ||
       phrase.includes('training') ||
       phrase.includes('module') ||
       phrase.includes('modules') ||
@@ -168,7 +194,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Opening your profile and certificates');
+      speakText('Opening profile and certificates');
       navigate('/profile');
       return true;
     }
@@ -180,6 +206,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       phrase.includes('dashboard') ||
       phrase.includes('main page') ||
       phrase.includes('start') ||
+      phrase.includes('portal') ||
       phrase.includes('होम') ||
       phrase.includes('डैशबोर्ड')
     ) {
@@ -199,13 +226,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       phrase.includes('doubts') ||
       phrase.includes('ai') ||
       phrase.includes('bot') ||
+      phrase.includes('help') ||
       phrase.includes('सहायक') ||
       phrase.includes('संदेह') ||
       phrase.includes('चैट')
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Opening IMD meteorological assistant');
+      speakText('Opening meteorological assistant');
       navigate('/chatbot');
       return true;
     }
@@ -277,6 +305,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       phrase.includes('read this') ||
       phrase.includes('read') ||
       phrase.includes('listen') ||
+      phrase.includes('speak notes') ||
       phrase.includes('बोलकर सुनाओ') ||
       phrase.includes('सुनो') ||
       phrase.includes('पढ़ो')
@@ -295,6 +324,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       phrase.includes('stop') ||
       phrase.includes('quiet') ||
       phrase.includes('silence') ||
+      phrase.includes('shut up') ||
+      phrase.includes('pause') ||
       phrase.includes('रुको') ||
       phrase.includes('शांत') ||
       phrase.includes('बंद करो')
@@ -397,9 +428,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     try {
-      // Abort lingering instance if any
+      // Abort lingering instance if any cleanly without triggering onend loops
       if (activeRecognitionRef.current) {
         try {
+          activeRecognitionRef.current.onend = null;
+          activeRecognitionRef.current.onerror = null;
           activeRecognitionRef.current.abort();
         } catch (e) {}
         activeRecognitionRef.current = null;
@@ -435,7 +468,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
 
       recognition.onerror = (event: any) => {
-        // 'no-speech' is routine silence; keep continuous listening alive
+        // 'no-speech' is routine pause; keep continuous listening alive
         if (event.error === 'no-speech') {
           return;
         }
@@ -446,7 +479,17 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           try {
             localStorage.setItem('imd_voice_active', 'false');
           } catch {}
-          speakText('Microphone permission not granted');
+          setLastRecognizedPhrase('⚠️ Mic blocked. Click lock in address bar to Allow.');
+          return;
+        }
+
+        if (event.error === 'audio-capture') {
+          setLastRecognizedPhrase('⚠️ No microphone found or in use by another app.');
+          return;
+        }
+
+        if (event.error === 'network') {
+          console.warn('Speech recognition network error, restarting...');
           return;
         }
 
@@ -484,6 +527,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     if (activeRecognitionRef.current) {
       try {
+        activeRecognitionRef.current.onend = null;
+        activeRecognitionRef.current.onerror = null;
         activeRecognitionRef.current.abort();
       } catch (e) {}
       activeRecognitionRef.current = null;
@@ -515,52 +560,54 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const wasActive = isVoiceActiveRef.current;
       pauseListening();
 
-      const proceedWithCapture = () => {
-        try {
-          const rec = new SR();
-          rec.lang = 'en-IN';
-          rec.continuous = false;
-          rec.interimResults = false;
-
-          let resolved = false;
-
-          rec.onresult = (event: any) => {
-            const transcript = event.results[0]?.[0]?.transcript?.trim() || '';
-            resolved = true;
-            playTone(680, 0.1);
-            if (wasActive) resumeListening();
-            resolve(transcript);
-          };
-
-          rec.onerror = (event: any) => {
-            if (!resolved) {
-              resolved = true;
-              if (wasActive) resumeListening();
-              resolve('');
-            }
-          };
-
-          rec.onend = () => {
-            if (!resolved) {
-              resolved = true;
-              if (wasActive) resumeListening();
-              resolve('');
-            }
-          };
-
-          rec.start();
-        } catch (e) {
-          if (wasActive) resumeListening();
-          resolve('');
-        }
+      let isResolved = false;
+      const safeResolve = (val: string) => {
+        if (isResolved) return;
+        isResolved = true;
+        if (wasActive) resumeListening();
+        resolve(val);
       };
 
-      if (promptMessage) {
-        speakText(promptMessage, 'en-US', () => {
-          proceedWithCapture();
-        });
-      } else {
-        proceedWithCapture();
+      // Safety timeout: 9 seconds max
+      const safetyTimer = setTimeout(() => {
+        safeResolve('');
+      }, 9000);
+
+      try {
+        playTone(580, 0.12); // Instant pleasant prompt chime
+
+        const rec = new SR();
+        rec.lang = 'en-IN';
+        rec.continuous = false;
+        rec.interimResults = true;
+
+        let captured = '';
+
+        rec.onresult = (event: any) => {
+          const trans = event.results[0]?.[0]?.transcript?.trim() || '';
+          if (trans) {
+            captured = trans;
+            setLastRecognizedPhrase(trans);
+          }
+        };
+
+        rec.onerror = () => {
+          clearTimeout(safetyTimer);
+          safeResolve(captured);
+        };
+
+        rec.onend = () => {
+          clearTimeout(safetyTimer);
+          if (captured) {
+            playTone(680, 0.12);
+          }
+          safeResolve(captured);
+        };
+
+        rec.start();
+      } catch (e) {
+        clearTimeout(safetyTimer);
+        safeResolve('');
       }
     });
   };
@@ -602,14 +649,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch {}
       playTone(550, 0.15);
 
-      // Play welcome announcement FIRST, and start listening ONLY AFTER speech ends to prevent self-echo!
-      speakText(
-        'Voice navigation active. Say: courses, certificates, home, chatbot, or read aloud.',
-        'en-US',
-        () => {
-          startNewListeningSession();
-        }
-      );
+      // Start recognition IMMEDIATELY without waiting for speech!
+      startNewListeningSession();
+
+      // Vocal welcome notification (non-blocking)
+      speakText('Voice navigation active. Speak courses, certificates, home, or chatbot.');
     }
   };
 
