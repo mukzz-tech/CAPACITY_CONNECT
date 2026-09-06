@@ -78,6 +78,22 @@ export const App: React.FC = () => {
                     </ProtectedRoute>
                   }
                 />
+                <Route
+                  path="/study/:id"
+                  element={
+                    <ProtectedRoute>
+                      <StudyMaterialPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/study"
+                  element={
+                    <ProtectedRoute>
+                      <StudyMaterialPage />
+                    </ProtectedRoute>
+                  }
+                />
 
                 {/* 4. Assessments Segment */}
                 <Route

@@ -420,14 +420,70 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return true;
     }
 
-    // 10. Read Aloud / TTS Trigger
+    // 10. Study Material Navigation
+    if (
+      phrase === 'study' ||
+      phrase === 'study material' ||
+      phrase === 'open study' ||
+      phrase === 'lectures' ||
+      phrase.startsWith('go to study') ||
+      phrase.includes('अध्ययन')
+    ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
+      setLastActionStatus('Opening Study Material...');
+      navigate('/study');
+      return true;
+    }
+
+    // 11. Play Lecture Video
+    if (
+      phrase === 'play video' ||
+      phrase === 'start video' ||
+      phrase === 'resume video' ||
+      phrase === 'listen video' ||
+      phrase === 'listen to video' ||
+      phrase === 'watch video' ||
+      phrase === 'lecture video' ||
+      phrase.includes('वीडियो चलाओ') ||
+      phrase.includes('लेक्चर')
+    ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
+      setLastActionStatus('Playing lecture video...');
+      window.dispatchEvent(new CustomEvent('imd-voice-video-play'));
+      return true;
+    }
+
+    // 12. Pause Lecture Video
+    if (
+      phrase === 'pause video' ||
+      phrase === 'pause lecture' ||
+      phrase.includes('वीडियो रोको')
+    ) {
+      lastCmdTimeRef.current = now;
+      playTone(450, 0.1);
+      setLastActionStatus('Paused lecture video');
+      window.dispatchEvent(new CustomEvent('imd-voice-video-pause'));
+      return true;
+    }
+
+    // 13. Read Aloud / Listen Study Notes
     if (
       phrase === 'read aloud' ||
       phrase === 'read notes' ||
       phrase === 'read this' ||
+      phrase === 'listen notes' ||
+      phrase === 'listen study notes' ||
+      phrase === 'listen study' ||
+      phrase === 'listen to notes' ||
+      phrase === 'read study notes' ||
+      phrase === 'speak notes' ||
       phrase === 'listen' ||
       phrase.includes('बोलकर सुनाओ') ||
-      phrase.includes('पढ़ो')
+      phrase.includes('पढ़ो') ||
+      phrase.includes('सुनो') ||
+      phrase.includes('नोट्स')
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
@@ -436,7 +492,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return true;
     }
 
-    // 11. Stop / Silence Active Speech
+    // 14. Stop / Silence Active Speech & Video
     if (
       phrase === 'stop' ||
       phrase === 'stop audio' ||
@@ -447,9 +503,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     ) {
       lastCmdTimeRef.current = now;
       playTone(400, 0.1);
-      setLastActionStatus('Audio stopped');
+      setLastActionStatus('Audio & Video stopped');
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
       window.dispatchEvent(new CustomEvent('imd-voice-stop'));
+      window.dispatchEvent(new CustomEvent('imd-voice-video-pause'));
       return true;
     }
 
