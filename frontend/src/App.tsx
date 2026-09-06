@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { VoiceProvider } from './context/VoiceContext';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
+import { VoiceAssistantWidget } from './components/VoiceAssistantWidget';
 
 // Segment Pages
 import { HomePage } from './segments/1_public/HomePage';
@@ -133,6 +134,7 @@ export const App: React.FC = () => {
               </Routes>
             </main>
             <Footer />
+            <VoiceAssistantWidget />
           </div>
         </VoiceProvider>
       </AuthProvider>

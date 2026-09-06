@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useVoice } from '../../context/VoiceContext';
 import {
   User,
   Award,
@@ -31,6 +32,7 @@ import { analyzeVideoFrame } from '../../utils/visionProctor';
 
 export const ProfilePage: React.FC = () => {
   const { user, refreshUser } = useAuth();
+  const { pauseListening, resumeListening } = useVoice();
   const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [competencyData, setCompetencyData] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -241,6 +243,7 @@ export const ProfilePage: React.FC = () => {
     }
     setMicTesting(false);
     setMicVolumeLevel(0);
+    resumeListening();
   };
 
   const handleTestMic = async () => {
@@ -254,6 +257,9 @@ export const ProfilePage: React.FC = () => {
       alert('Speech Recognition not supported in this browser. Please use Chrome or Edge.');
       return;
     }
+
+    // Pause global VoiceContext to prevent recognition collision
+    pauseListening();
 
     setMicTesting(true);
     setMicHeardText('Opening microphone and measuring audio levels...');
@@ -320,17 +326,19 @@ export const ProfilePage: React.FC = () => {
 
       rec.onerror = (e: any) => {
         if (e.error === 'no-speech') {
-          if (!detectedAudio) {
-            setMicHeardText('⚠️ No sound picked up by microphone. Check Windows Settings -> Sound -> Input to verify your microphone is not muted and volume is 80-100%.');
+          // Chrome fires no-speech routinely during pauses; do not abort test
+          if (detectedAudio) {
+            setMicHeardText('Sound detected! Speak closer to your microphone (e.g. "Radar", "Weather")...');
           } else {
-            setMicHeardText('Audio sound was detected, but no clear words were recognized. Please speak closer to your microphone and click Test Mic again.');
+            setMicHeardText('Listening... Speak clearly into your microphone...');
           }
+          return;
         } else if (e.error === 'not-allowed') {
           setMicHeardText('Microphone permission blocked. Please click the lock icon in your browser address bar and choose Allow.');
+          stopMicTest();
         } else {
-          setMicHeardText(`Microphone error: ${e.error}. Try speaking louder.`);
+          setMicHeardText(`Microphone status: ${e.error}. Listening...`);
         }
-        stopMicTest();
       };
 
       rec.onend = () => {

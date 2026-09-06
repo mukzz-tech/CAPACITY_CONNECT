@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useVoice } from '../../context/VoiceContext';
 import { StrictProctor } from '../../components/StrictProctor';
 import {
   Award,
@@ -18,6 +19,7 @@ import { Question } from '../../types';
 export const AssessmentPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const { speakText, playTone, captureVoiceInput } = useVoice();
   const navigate = useNavigate();
 
   const [assessment, setAssessment] = useState<any>(null);
@@ -29,39 +31,41 @@ export const AssessmentPage: React.FC = () => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [results, setResults] = useState<any>(null);
 
+  // Active question index for hands-free voice answering
+  const [activeQuestionIndex, setActiveQuestionIndex] = useState<number>(0);
+
   // Match the following state: { questionId: { leftItem: rightItem } }
   const [matchSelections, setMatchSelections] = useState<Record<string, Record<string, string>>>({});
 
   // Voice recording state
   const [voiceRecordingForQ, setVoiceRecordingForQ] = useState<string | null>(null);
 
+  // Synchronized refs for event handlers to avoid stale closures
+  const activeQuestionIndexRef = useRef<number>(0);
+  const assessmentRef = useRef<any>(null);
+  const submissionsRef = useRef<Record<string, any>>({});
+  const handleSubmitRef = useRef<() => void>(() => {});
+
   useEffect(() => {
-    // Generate an attempt session id for proctoring signals
-    setAttemptId(`ATTEMPT-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`);
+    activeQuestionIndexRef.current = activeQuestionIndex;
+  }, [activeQuestionIndex]);
 
-    const token = localStorage.getItem('token');
-    fetch(`/api/assessments/${id}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.assessment) {
-          setAssessment(data.assessment);
-        }
-      })
-      .catch(console.warn)
-      .finally(() => setLoading(false));
+  useEffect(() => {
+    assessmentRef.current = assessment;
+  }, [assessment]);
 
-    // Listen for voice navigation "next question"
-    const handleNextQuestion = () => {
-      window.scrollBy({ top: 300, behavior: 'smooth' });
-    };
-    window.addEventListener('imd-voice-next-question', handleNextQuestion);
+  useEffect(() => {
+    submissionsRef.current = submissions;
+  }, [submissions]);
 
-    return () => {
-      window.removeEventListener('imd-voice-next-question', handleNextQuestion);
-    };
-  }, [id]);
+  const scrollToQuestion = (idx: number) => {
+    setTimeout(() => {
+      const el = document.getElementById(`question-card-${idx}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  };
 
   const handleMcqSelect = (questionId: string, optionId: string) => {
     setSubmissions((prev) => ({ ...prev, [questionId]: optionId }));
@@ -78,123 +82,6 @@ export const AssessmentPage: React.FC = () => {
       setSubmissions((subPrev) => ({ ...subPrev, [questionId]: updated }));
       return { ...prev, [questionId]: updated };
     });
-  };
-
-  const playChime = (freq = 550) => {
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      gain.gain.setValueAtTime(0.2, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.15);
-    } catch (e) {}
-  };
-
-  const speakFeedback = (text: string) => {
-    try {
-      if (!('speechSynthesis' in window)) return;
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.0;
-      window.speechSynthesis.speak(utterance);
-    } catch (e) {}
-  };
-
-  const handleVoiceAnswer = async (questionId: string, qType = 'VOICE_ANSWER', options?: Array<{ id: string; text: string }>) => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      alert('Speech Recognition is not available in this browser. Please use Google Chrome or Microsoft Edge.');
-      return;
-    }
-
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((t) => t.stop());
-      }
-    } catch (micErr) {
-      alert('Microphone permission is required to capture your voice answer. Please allow microphone access in your browser.');
-      return;
-    }
-
-    setVoiceRecordingForQ(questionId);
-    playChime(600);
-    speakFeedback('Listening. Speak your answer now.');
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-
-    recognition.onresult = (event: any) => {
-      const spokenText = event.results[0][0].transcript.trim();
-      playChime(700);
-
-      if (qType === 'MCQ' && options) {
-        const lower = spokenText.toLowerCase();
-        let selected: string | null = null;
-
-        // Check for "option A", "A", etc.
-        for (const opt of options) {
-          const optLetter = opt.id.toLowerCase();
-          if (
-            lower === optLetter ||
-            lower.includes(`option ${optLetter}`) ||
-            lower.startsWith(`option ${optLetter}`) ||
-            lower.includes(opt.text.toLowerCase().substring(0, 15))
-          ) {
-            selected = opt.id;
-            break;
-          }
-        }
-
-        if (selected) {
-          setSubmissions((prev) => ({ ...prev, [questionId]: selected }));
-          setIsVoiceFlag((prev) => ({ ...prev, [questionId]: true }));
-          speakFeedback(`Selected Option ${selected}`);
-        } else {
-          // If no option letter matched directly, check first letter of spoken text
-          const firstChar = spokenText.charAt(0).toUpperCase();
-          if (['A', 'B', 'C', 'D'].includes(firstChar)) {
-            setSubmissions((prev) => ({ ...prev, [questionId]: firstChar }));
-            setIsVoiceFlag((prev) => ({ ...prev, [questionId]: true }));
-            speakFeedback(`Selected Option ${firstChar}`);
-          } else {
-            speakFeedback(`Heard: ${spokenText}. Please say Option A, B, C, or D.`);
-          }
-        }
-      } else {
-        // Fill in the blank or Voice Answer
-        setSubmissions((prev) => ({ ...prev, [questionId]: spokenText }));
-        setIsVoiceFlag((prev) => ({ ...prev, [questionId]: true }));
-        speakFeedback(`Answer recorded: ${spokenText}`);
-      }
-
-      setVoiceRecordingForQ(null);
-    };
-
-    recognition.onerror = (err: any) => {
-      console.warn('Voice recognition error:', err);
-      setVoiceRecordingForQ(null);
-    };
-
-    recognition.onend = () => {
-      setVoiceRecordingForQ(null);
-    };
-
-    try {
-      recognition.start();
-    } catch (e) {
-      setVoiceRecordingForQ(null);
-    }
   };
 
   const handleSubmitAttempt = async () => {
@@ -225,6 +112,8 @@ export const AssessmentPage: React.FC = () => {
       const data = await res.json();
       if (res.ok) {
         setResults(data);
+        playTone(720, 0.2);
+        speakText(`Assessment evaluated. Your score is ${data.attempt?.percentage || 0} percent.`);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
         alert(data.error || 'Failed to submit attempt');
@@ -233,6 +122,169 @@ export const AssessmentPage: React.FC = () => {
       alert(e.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmitAttempt;
+  });
+
+  useEffect(() => {
+    // Generate an attempt session id for proctoring signals
+    setAttemptId(`ATTEMPT-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`);
+
+    const token = localStorage.getItem('token');
+    fetch(`/api/assessments/${id}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.assessment) {
+          setAssessment(data.assessment);
+        }
+      })
+      .catch(console.warn)
+      .finally(() => setLoading(false));
+
+    // Hands-Free Event: Next Question
+    const handleNextQuestion = () => {
+      if (!assessmentRef.current?.questions?.length) return;
+      const total = assessmentRef.current.questions.length;
+      const nextIdx = Math.min(total - 1, activeQuestionIndexRef.current + 1);
+      setActiveQuestionIndex(nextIdx);
+      scrollToQuestion(nextIdx);
+    };
+
+    // Hands-Free Event: Previous Question
+    const handlePrevQuestion = () => {
+      const prevIdx = Math.max(0, activeQuestionIndexRef.current - 1);
+      setActiveQuestionIndex(prevIdx);
+      scrollToQuestion(prevIdx);
+    };
+
+    // Hands-Free Event: Submit Assessment
+    const handleVoiceSubmit = () => {
+      handleSubmitRef.current();
+    };
+
+    // Hands-Free Event: Option Selection (MCQ)
+    const handleVoiceOptionSelect = (e: any) => {
+      const opt = e.detail;
+      if (!opt || !assessmentRef.current?.questions?.length) return;
+      const questions = assessmentRef.current.questions;
+      const currIdx = activeQuestionIndexRef.current;
+      const currQ = questions[currIdx];
+
+      // Prefer currently focused question if MCQ, or find first unanswered MCQ
+      let targetQ = (currQ && currQ.questionType === 'MCQ') ? currQ : null;
+      let targetIdx = currIdx;
+
+      if (!targetQ) {
+        for (let i = 0; i < questions.length; i++) {
+          if (questions[i].questionType === 'MCQ' && !submissionsRef.current[questions[i].id]) {
+            targetQ = questions[i];
+            targetIdx = i;
+            break;
+          }
+        }
+      }
+
+      if (targetQ) {
+        setSubmissions((prev) => ({ ...prev, [targetQ.id]: opt }));
+        setIsVoiceFlag((prev) => ({ ...prev, [targetQ.id]: true }));
+        playTone(650, 0.1);
+
+        // Advance to next question after selecting answer
+        if (targetIdx < questions.length - 1) {
+          const nextIdx = targetIdx + 1;
+          setActiveQuestionIndex(nextIdx);
+          scrollToQuestion(nextIdx);
+        }
+      }
+    };
+
+    // Hands-Free Event: General Spoken Input (Fill in the blank / Voice Answer)
+    const handleVoiceGeneral = (e: any) => {
+      const phrase = e.detail;
+      if (!phrase || !assessmentRef.current?.questions?.length) return;
+      const questions = assessmentRef.current.questions;
+      const currIdx = activeQuestionIndexRef.current;
+      const currQ = questions[currIdx];
+
+      if (currQ && (currQ.questionType === 'FILL_BLANK' || currQ.questionType === 'VOICE_ANSWER')) {
+        setSubmissions((prev) => ({ ...prev, [currQ.id]: phrase }));
+        setIsVoiceFlag((prev) => ({ ...prev, [currQ.id]: true }));
+        playTone(650, 0.1);
+        speakText(`Answer recorded: ${phrase}`);
+      }
+    };
+
+    window.addEventListener('imd-voice-next-question', handleNextQuestion);
+    window.addEventListener('imd-voice-prev-question', handlePrevQuestion);
+    window.addEventListener('imd-voice-submit', handleVoiceSubmit);
+    window.addEventListener('imd-voice-option-select', handleVoiceOptionSelect);
+    window.addEventListener('imd-voice-general', handleVoiceGeneral);
+
+    return () => {
+      window.removeEventListener('imd-voice-next-question', handleNextQuestion);
+      window.removeEventListener('imd-voice-prev-question', handlePrevQuestion);
+      window.removeEventListener('imd-voice-submit', handleVoiceSubmit);
+      window.removeEventListener('imd-voice-option-select', handleVoiceOptionSelect);
+      window.removeEventListener('imd-voice-general', handleVoiceGeneral);
+    };
+  }, [id]);
+
+  const handleVoiceAnswer = async (questionId: string, qType = 'VOICE_ANSWER', options?: Array<{ id: string; text: string }>) => {
+    setVoiceRecordingForQ(questionId);
+    try {
+      const transcript = await captureVoiceInput('Listening. Speak your answer now.');
+      if (!transcript) {
+        setVoiceRecordingForQ(null);
+        return;
+      }
+
+      if (qType === 'MCQ' && options) {
+        const lower = transcript.toLowerCase();
+        let selected: string | null = null;
+
+        for (const opt of options) {
+          const optLetter = opt.id.toLowerCase();
+          if (
+            lower === optLetter ||
+            lower.includes(`option ${optLetter}`) ||
+            lower.startsWith(`option ${optLetter}`) ||
+            lower.includes(opt.text.toLowerCase().substring(0, 15))
+          ) {
+            selected = opt.id;
+            break;
+          }
+        }
+
+        if (!selected) {
+          const firstChar = transcript.charAt(0).toUpperCase();
+          if (['A', 'B', 'C', 'D'].includes(firstChar)) {
+            selected = firstChar;
+          }
+        }
+
+        if (selected) {
+          setSubmissions((prev) => ({ ...prev, [questionId]: selected }));
+          setIsVoiceFlag((prev) => ({ ...prev, [questionId]: true }));
+          playTone(650, 0.1);
+          speakText(`Selected Option ${selected}`);
+        } else {
+          speakText(`Heard: ${transcript}. Please say Option A, B, C, or D.`);
+        }
+      } else {
+        setSubmissions((prev) => ({ ...prev, [questionId]: transcript }));
+        setIsVoiceFlag((prev) => ({ ...prev, [questionId]: true }));
+        playTone(650, 0.1);
+        speakText(`Answer recorded: ${transcript}`);
+      }
+    } catch (err) {
+      console.warn('Voice answer error:', err);
+    } finally {
+      setVoiceRecordingForQ(null);
     }
   };
 
@@ -379,12 +431,26 @@ export const AssessmentPage: React.FC = () => {
             {assessment.questions.map((q: Question, idx: number) => (
               <div
                 key={q.id}
-                className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4"
+                id={`question-card-${idx}`}
+                onClick={() => setActiveQuestionIndex(idx)}
+                className={`bg-white rounded-2xl p-6 shadow-sm space-y-4 transition-all cursor-pointer ${
+                  activeQuestionIndex === idx
+                    ? 'ring-2 ring-indigo-500 shadow-indigo-100 border-indigo-300 border'
+                    : 'border border-slate-200 hover:border-slate-300'
+                }`}
               >
                 <div className="flex justify-between items-start gap-2">
-                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
-                    Question {idx + 1} of {assessment.questions.length} • {q.marks} Mark{q.marks > 1 ? 's' : ''}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                      Question {idx + 1} of {assessment.questions.length} • {q.marks} Mark{q.marks > 1 ? 's' : ''}
+                    </span>
+                    {activeQuestionIndex === idx && (
+                      <span className="flex items-center gap-1 text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200 animate-in fade-in duration-200">
+                        <Mic className="w-3 h-3 text-indigo-600 animate-pulse" />
+                        <span>Active Spoken Target</span>
+                      </span>
+                    )}
+                  </div>
 
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-semibold">
                     {q.questionType.replace('_', ' ')}

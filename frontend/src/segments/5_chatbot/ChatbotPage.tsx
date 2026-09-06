@@ -24,7 +24,7 @@ interface ChatMsg {
 
 export const ChatbotPage: React.FC = () => {
   const { user } = useAuth();
-  const { speakText, playTone } = useVoice();
+  const { speakText, playTone, captureVoiceInput } = useVoice();
   const [messages, setMessages] = useState<ChatMsg[]>([
     {
       sender: 'assistant',
@@ -148,52 +148,17 @@ export const ChatbotPage: React.FC = () => {
   };
 
   const handleVoiceQuery = async () => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      alert('Speech Recognition is not available in this browser. Please use Google Chrome or Microsoft Edge.');
-      return;
-    }
-
+    setIsRecording(true);
     try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((t) => t.stop());
+      const transcript = await captureVoiceInput('Listening for your meteorological doubt. Speak now.');
+      if (transcript) {
+        setInput(transcript);
+        playTone(650, 0.15);
+        handleSend(transcript);
       }
     } catch (e) {
-      alert('Please allow microphone permissions in your browser to speak your question.');
-      return;
-    }
-
-    setIsRecording(true);
-    playTone(550, 0.15);
-    speakText('Listening for your meteorological doubt. Speak now.');
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInput(transcript);
-      setIsRecording(false);
-      playTone(650, 0.15);
-      handleSend(transcript);
-    };
-
-    recognition.onerror = (err: any) => {
-      console.warn('Voice query error:', err);
-      setIsRecording(false);
-    };
-
-    recognition.onend = () => {
-      setIsRecording(false);
-    };
-
-    try {
-      recognition.start();
-    } catch (e) {
+      console.warn('Voice query error:', e);
+    } finally {
       setIsRecording(false);
     }
   };
