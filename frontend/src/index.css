@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans;
+  }
+}
+
+.font-serif {
+  font-family: 'Merriweather', serif;
+}
+
+/* Custom smooth pulse animation for voice listener */
+@keyframes voice-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.5;
+  }
+}
+
+.animate-voice-pulse {
+  animation: voice-pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
