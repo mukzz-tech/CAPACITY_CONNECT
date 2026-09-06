@@ -1,6 +1,13 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ShieldAlert, ShieldCheck, Eye, Video, VideoOff, RefreshCw, Sparkles, AlertTriangle } from 'lucide-react';
-import { getCameraStream, releaseCameraStream, attachStreamToVideo } from '../utils/cameraManager';
+import {
+  getCameraStream,
+  releaseCameraStream,
+  attachStreamToVideo,
+  getVideoDevices,
+  setSimulatedGaze,
+  getSimulatedGaze,
+} from '../utils/cameraManager';
 
 interface StrictProctorProps {
   attemptId: string;
@@ -17,12 +24,21 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
 
   const [hasWebcam, setHasWebcam] = useState<boolean>(false);
   const [isSimulatedMode, setIsSimulatedMode] = useState<boolean>(false);
+  const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedCameraMode, setSelectedCameraMode] = useState<string>('auto');
+  const [simGazeState, setSimGazeState] = useState<'center' | 'away' | 'absent'>('center');
   const [integrityScore, setIntegrityScore] = useState<number>(100.0);
-  const [statusMessage, setStatusMessage] = useState<string>('Click "Turn On Camera" or allow browser prompt');
+  const [statusMessage, setStatusMessage] = useState<string>('Click "Turn On Camera" or choose OpenCV Sim');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isNormal, setIsNormal] = useState<boolean>(true);
   const [flagCount, setFlagCount] = useState<number>(0);
   const [isRequesting, setIsRequesting] = useState<boolean>(false);
+
+  useEffect(() => {
+    getVideoDevices().then((devs) => {
+      setAvailableDevices(devs);
+    }).catch(console.warn);
+  }, []);
 
   // Time counters for threshold checking
   const noFaceDurationRef = useRef<number>(0);
@@ -76,35 +92,41 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
       videoRef.current.srcObject = null;
     }
     setHasWebcam(false);
+    setIsSimulatedMode(false);
     setStatusMessage('Camera turned off');
   };
 
-  // Start hardware camera using shared camera manager
-  const startCamera = async () => {
+  // Start hardware camera using shared camera manager or simulated feed
+  const startCamera = async (overrideMode?: string) => {
+    const mode = overrideMode !== undefined ? overrideMode : selectedCameraMode;
     setIsRequesting(true);
     setErrorMessage(null);
-    setStatusMessage('Requesting camera access...');
+    setStatusMessage('Connecting video stream...');
 
     try {
-      const stream = await getCameraStream();
+      const stream = await getCameraStream(mode === 'auto' ? undefined : mode);
       streamRef.current = stream;
       if (videoRef.current) {
         attachStreamToVideo(videoRef.current, stream);
       }
 
       setHasWebcam(true);
-      setIsSimulatedMode(false);
-      setStatusMessage('Attentiveness verified (1 Face Present)');
+      setIsSimulatedMode(mode === 'simulated');
+      setStatusMessage(
+        mode === 'simulated'
+          ? 'OpenCV Simulation Feed Active (1 Face Centered)'
+          : 'Attentiveness verified (1 Face Present)'
+      );
       setErrorMessage(null);
     } catch (lastErr: any) {
       console.warn('Could not open camera:', lastErr);
       setHasWebcam(false);
       if (lastErr?.name === 'NotAllowedError' || lastErr?.name === 'PermissionDeniedError') {
-        setErrorMessage('Camera access was blocked. Please click the camera or lock icon in your browser address bar (left of localhost:5173), select "Allow", and click "Turn On Camera".');
+        setErrorMessage('Camera access was blocked. Please click the camera or lock icon in your browser address bar, select "Allow", and click "Turn On Camera".');
       } else if (lastErr?.name === 'NotFoundError' || lastErr?.name === 'DevicesNotFoundError') {
-        setErrorMessage('No camera hardware detected on this machine. You can click "Simulated Face Test" below to test proctoring.');
+        setErrorMessage('No camera hardware detected. Switch to "OpenCV Live Simulated Feed" below to verify proctoring.');
       } else if (lastErr?.name === 'NotReadableError' || lastErr?.name === 'TrackStartError') {
-        setErrorMessage('Camera is currently in use by another application (e.g. Zoom, Teams, or another browser tab). Please close other apps and click "Turn On Camera".');
+        setErrorMessage('Camera is currently in use by another application. Close other apps or use "OpenCV Live Simulated Feed".');
       } else {
         setErrorMessage(`Camera error: ${lastErr?.message || 'Unable to open video stream'}`);
       }
@@ -114,13 +136,21 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
     }
   };
 
-  // Start simulated test feed (fallback for systems without camera or testing)
-  const startSimulatedMode = () => {
-    stopTracks();
-    setHasWebcam(false);
-    setIsSimulatedMode(true);
-    setErrorMessage(null);
-    setStatusMessage('Simulated Face Feed Active (Verification Mode)');
+  const handleSimGazeChange = (gaze: 'center' | 'away' | 'absent') => {
+    setSimulatedGaze(gaze);
+    setSimGazeState(gaze);
+    if (gaze === 'center') {
+      setStatusMessage('Normal: 1 Face Detected & Focused');
+      setIsNormal(true);
+    } else if (gaze === 'away') {
+      setStatusMessage('FLAG: Face significantly turned away (>3s)');
+      setIsNormal(false);
+      sendProctorSignal('FACE_TURNED_AWAY', 'Candidate gaze turned off-center for >3s');
+    } else {
+      setStatusMessage('FLAG: No face detected in frame (>3s)');
+      setIsNormal(false);
+      sendProctorSignal('NO_FACE_DETECTED', 'Face disappeared or covered for >3s');
+    }
   };
 
   // Automatically attempt opening camera on initial mount
@@ -217,6 +247,27 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
         </span>
       </div>
 
+      {/* Camera Source Selector */}
+      <div className="flex items-center gap-2 text-xs">
+        <label className="text-[10px] text-slate-400 font-semibold">Camera:</label>
+        <select
+          value={selectedCameraMode}
+          onChange={(e) => {
+            setSelectedCameraMode(e.target.value);
+            startCamera(e.target.value);
+          }}
+          className="flex-1 text-[11px] rounded-lg border border-slate-700 p-1 bg-slate-800 text-slate-200 font-medium"
+        >
+          <option value="auto">Auto-Detect Webcam (Bypasses Phone Link)</option>
+          <option value="simulated">🧑‍💻 OpenCV Live Simulated Feed (No Cam Required)</option>
+          {availableDevices.map((d, i) => (
+            <option key={d.deviceId || i} value={d.deviceId}>
+              {d.label || `Camera ${i + 1}`}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* Video Container */}
       <div className="relative w-full h-44 bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
         {/* Real video stream */}
@@ -254,7 +305,7 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
             <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
               <button
                 type="button"
-                onClick={startCamera}
+                onClick={() => startCamera()}
                 disabled={isRequesting}
                 className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow"
               >
@@ -263,7 +314,10 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
               </button>
               <button
                 type="button"
-                onClick={startSimulatedMode}
+                onClick={() => {
+                  setSelectedCameraMode('simulated');
+                  startCamera('simulated');
+                }}
                 className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition"
               >
                 Simulated Face Test
@@ -308,7 +362,7 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
           ) : (
             <button
               type="button"
-              onClick={startCamera}
+              onClick={() => startCamera()}
               className="text-blue-400 hover:text-blue-300 underline transition font-medium"
             >
               Turn On Camera
@@ -317,7 +371,10 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
           {!isSimulatedMode && (
             <button
               type="button"
-              onClick={startSimulatedMode}
+              onClick={() => {
+                setSelectedCameraMode('simulated');
+                startCamera('simulated');
+              }}
               className="text-slate-400 hover:text-white underline transition"
             >
               Simulate Feed

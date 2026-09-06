@@ -19,7 +19,14 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { Certificate } from '../../types';
-import { getCameraStream, releaseCameraStream, attachStreamToVideo } from '../../utils/cameraManager';
+import {
+  getCameraStream,
+  releaseCameraStream,
+  attachStreamToVideo,
+  getVideoDevices,
+  setSimulatedGaze,
+  getSimulatedGaze,
+} from '../../utils/cameraManager';
 
 export const ProfilePage: React.FC = () => {
   const { user, refreshUser } = useAuth();
@@ -91,14 +98,25 @@ export const ProfilePage: React.FC = () => {
   // Hardware Diagnostics State & Handlers
   const [testCameraActive, setTestCameraActive] = useState<boolean>(false);
   const [cameraStatusMsg, setCameraStatusMsg] = useState<string>('');
+  const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedCameraMode, setSelectedCameraMode] = useState<string>('auto');
+  const [simGazeState, setSimGazeState] = useState<'center' | 'away' | 'absent'>('center');
   const [testAudioPlaying, setTestAudioPlaying] = useState<boolean>(false);
   const [micTesting, setMicTesting] = useState<boolean>(false);
   const [micHeardText, setMicHeardText] = useState<string>('');
   const testVideoRef = useRef<HTMLVideoElement | null>(null);
   const testStreamRef = useRef<MediaStream | null>(null);
 
-  const handleTestWebcam = async () => {
-    if (testCameraActive) {
+  useEffect(() => {
+    getVideoDevices().then((devs) => {
+      setAvailableDevices(devs);
+    }).catch(console.warn);
+  }, []);
+
+  const handleTestWebcam = async (overrideMode?: string) => {
+    const mode = overrideMode !== undefined ? overrideMode : selectedCameraMode;
+
+    if (testCameraActive && overrideMode === undefined) {
       releaseCameraStream();
       testStreamRef.current = null;
       if (testVideoRef.current) {
@@ -109,18 +127,42 @@ export const ProfilePage: React.FC = () => {
       return;
     }
 
-    setCameraStatusMsg('Requesting camera permission...');
+    if (testStreamRef.current) {
+      releaseCameraStream();
+    }
+
+    setCameraStatusMsg('Initializing video stream...');
     try {
-      const stream = await getCameraStream();
+      const stream = await getCameraStream(mode === 'auto' ? undefined : mode);
       testStreamRef.current = stream;
       setTestCameraActive(true);
-      setCameraStatusMsg('Webcam is working! Live local preview active.');
+
+      if (mode === 'simulated') {
+        setCameraStatusMsg('Live OpenCV Simulation Active! Test face centered (100% Integrity).');
+      } else {
+        const devs = await getVideoDevices();
+        setAvailableDevices(devs);
+        setCameraStatusMsg('Camera hardware active and streaming!');
+      }
+
       if (testVideoRef.current) {
         attachStreamToVideo(testVideoRef.current, stream);
       }
     } catch (err: any) {
       setTestCameraActive(false);
-      setCameraStatusMsg(`Camera test failed: ${err?.message || 'Access blocked or device not found'}`);
+      setCameraStatusMsg(`Camera access failed: ${err?.message || 'Access blocked or device not found'}. You can switch to "OpenCV Simulated Face Feed" below to test proctoring.`);
+    }
+  };
+
+  const handleSimGazeChange = (gaze: 'center' | 'away' | 'absent') => {
+    setSimulatedGaze(gaze);
+    setSimGazeState(gaze);
+    if (gaze === 'center') {
+      setCameraStatusMsg('OpenCV Result: Face Centered & Focused • 100/100 Normal');
+    } else if (gaze === 'away') {
+      setCameraStatusMsg('OpenCV Result: FLAG_FACE_TURNED_AWAY (-5 pts deduction)');
+    } else {
+      setCameraStatusMsg('OpenCV Result: FLAG_NO_FACE_DETECTED (-10 pts deduction)');
     }
   };
 
@@ -144,25 +186,50 @@ export const ProfilePage: React.FC = () => {
     audio.play().catch(() => setTestAudioPlaying(false));
   };
 
-  const handleTestMic = () => {
+  const handleTestMic = async () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
       alert('Speech Recognition not supported in this browser. Please use Chrome or Edge.');
       return;
     }
+
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+        s.getTracks().forEach((t) => t.stop());
+      }
+    } catch (e) {
+      setMicHeardText('Microphone permission blocked. Please allow mic in browser settings.');
+      return;
+    }
+
     setMicTesting(true);
-    setMicHeardText('Listening... Please speak any word into your microphone now.');
+    setMicHeardText('Listening... Please speak any word into your microphone now (e.g. "Radar", "Weather", "Courses").');
+
     const rec = new SR();
-    rec.lang = 'en-US';
+    rec.lang = 'en-IN';
+    rec.continuous = false;
+    rec.interimResults = false;
+
     rec.onresult = (e: any) => {
       const text = e.results[0][0].transcript;
       setMicHeardText(`Microphone heard: "${text}" (Microphone 100% Operational)`);
       setMicTesting(false);
+      try {
+        const utterance = new SpeechSynthesisUtterance(`Microphone verified. Heard: ${text}`);
+        window.speechSynthesis.speak(utterance);
+      } catch (err) {}
     };
+
     rec.onerror = (e: any) => {
-      setMicHeardText(`Microphone error: ${e.error}`);
+      if (e.error !== 'no-speech') {
+        setMicHeardText(`Microphone status: ${e.error}. Try speaking louder.`);
+      } else {
+        setMicHeardText('No speech detected. Please speak into your microphone and click Test Mic again.');
+      }
       setMicTesting(false);
     };
+
     rec.onend = () => setMicTesting(false);
     rec.start();
   };
@@ -436,22 +503,62 @@ export const ProfilePage: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-800 flex items-center gap-1.5">
                 <Video className="w-4 h-4 text-blue-600" />
-                1. Webcam Test
+                1. Webcam / OpenCV Test
               </span>
-              <button
-                type="button"
-                onClick={handleTestWebcam}
-                className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition ${
-                  testCameraActive
-                    ? 'bg-rose-600 text-white'
-                    : 'bg-blue-600 text-white hover:bg-blue-500'
-                }`}
-              >
-                {testCameraActive ? 'Stop Webcam' : 'Test Camera'}
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleTestWebcam()}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition ${
+                    testCameraActive
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-blue-600 text-white hover:bg-blue-500'
+                  }`}
+                >
+                  {testCameraActive ? 'Stop' : 'Test Camera'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCameraMode('simulated');
+                    handleTestWebcam('simulated');
+                  }}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition ${
+                    selectedCameraMode === 'simulated' && testCameraActive
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+                  }`}
+                  title="Run OpenCV test face without needing physical webcam"
+                >
+                  OpenCV Sim
+                </button>
+              </div>
             </div>
 
-            <div className="w-full h-32 bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center relative border border-slate-700">
+            {/* Camera Source Selector */}
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-500 font-semibold block">Select Camera Source:</label>
+              <select
+                value={selectedCameraMode}
+                onChange={(e) => {
+                  setSelectedCameraMode(e.target.value);
+                  if (testCameraActive) {
+                    handleTestWebcam(e.target.value);
+                  }
+                }}
+                className="w-full text-[11px] rounded-lg border border-slate-300 p-1 bg-white font-medium text-slate-800"
+              >
+                <option value="auto">Auto-Detect Webcam (Bypasses Phone Link)</option>
+                <option value="simulated">🧑‍💻 OpenCV Live Simulated Face Feed (No Camera Needed)</option>
+                {availableDevices.map((d, i) => (
+                  <option key={d.deviceId || i} value={d.deviceId}>
+                    {d.label || `Camera ${i + 1}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="w-full h-36 bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center relative border border-slate-700">
               <video
                 ref={testVideoRef}
                 autoPlay
@@ -462,14 +569,60 @@ export const ProfilePage: React.FC = () => {
                 }`}
               />
               {!testCameraActive && (
-                <span className="text-slate-400 text-[11px] text-center px-4">
-                  Click "Test Camera" to request browser permission & view feed
-                </span>
+                <div className="text-center px-4 space-y-1">
+                  <span className="text-slate-400 text-[10px] block">
+                    Click "Test Camera" or "OpenCV Sim" to start video feed
+                  </span>
+                </div>
+              )}
+
+              {testCameraActive && selectedCameraMode === 'simulated' && (
+                <div className="absolute top-1 right-1 bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-[9px] px-1.5 py-0.5 rounded font-mono font-bold">
+                  OPENCV ACTIVE
+                </div>
               )}
             </div>
 
+            {/* OpenCV Simulation Controls */}
+            {testCameraActive && selectedCameraMode === 'simulated' && (
+              <div className="space-y-1 pt-1 bg-indigo-50/80 p-2 rounded-xl border border-indigo-100">
+                <span className="text-[10px] text-indigo-900 font-bold block">
+                  Test OpenCV Head/Gaze Detection Signals:
+                </span>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSimGazeChange('center')}
+                    className={`flex-1 py-1 rounded text-[10px] font-bold transition ${
+                      simGazeState === 'center' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700'
+                    }`}
+                  >
+                    Center (100)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSimGazeChange('away')}
+                    className={`flex-1 py-1 rounded text-[10px] font-bold transition ${
+                      simGazeState === 'away' ? 'bg-amber-600 text-white shadow-sm' : 'bg-white border text-slate-700'
+                    }`}
+                  >
+                    Gaze Away (-5)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSimGazeChange('absent')}
+                    className={`flex-1 py-1 rounded text-[10px] font-bold transition ${
+                      simGazeState === 'absent' ? 'bg-rose-600 text-white shadow-sm' : 'bg-white border text-slate-700'
+                    }`}
+                  >
+                    Absent (-10)
+                  </button>
+                </div>
+              </div>
+            )}
+
             {cameraStatusMsg && (
-              <p className="text-[11px] text-slate-600 font-mono leading-tight">
+              <p className="text-[11px] text-slate-700 font-mono leading-tight bg-white p-2 rounded-lg border border-slate-200">
                 {cameraStatusMsg}
               </p>
             )}

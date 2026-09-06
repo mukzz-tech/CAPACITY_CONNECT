@@ -175,14 +175,31 @@ export const Navbar: React.FC = () => {
           </div>
         </div>
 
-        {/* Live Voice Command Bar (Shown when Voice is active and speaking) */}
-        {isVoiceActive && lastRecognizedPhrase && (
-          <div className="py-1 px-3 bg-red-950/40 border-t border-red-900/50 flex items-center justify-between text-xs text-red-200">
-            <span className="flex items-center gap-2">
-              <Mic className="w-3 h-3 text-red-400 animate-pulse" />
-              <span>Recognized phrase: <strong className="text-white">"{lastRecognizedPhrase}"</strong></span>
-            </span>
-            <span className="text-[10px] text-red-400">Say: "go to courses", "open my certificates", "read this aloud"</span>
+        {/* Live Voice Command Bar (Shown whenever Voice Control is ON) */}
+        {isVoiceActive && (
+          <div className="py-1.5 px-4 bg-gradient-to-r from-red-950/80 via-slate-900 to-red-950/80 border-t border-red-800/60 flex flex-wrap items-center justify-between text-xs text-red-200 animate-in fade-in duration-200">
+            <div className="flex items-center gap-2.5">
+              <div className="relative flex items-center justify-center">
+                <span className="w-3 h-3 rounded-full bg-red-500 animate-ping absolute" />
+                <span className="w-2 h-2 rounded-full bg-red-400" />
+              </div>
+              <Mic className="w-3.5 h-3.5 text-red-400 animate-pulse" />
+              <span className="font-semibold text-white">
+                {lastRecognizedPhrase ? (
+                  <>Heard: <strong className="text-amber-300 font-mono text-xs">"{lastRecognizedPhrase}"</strong></>
+                ) : (
+                  <span className="text-red-200 animate-pulse">Listening for voice command...</span>
+                )}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 text-[11px] text-slate-300">
+              <span className="text-slate-400">Try saying:</span>
+              <span className="px-1.5 py-0.5 rounded bg-slate-800/80 font-mono text-amber-300">"courses"</span>
+              <span className="px-1.5 py-0.5 rounded bg-slate-800/80 font-mono text-amber-300">"profile"</span>
+              <span className="px-1.5 py-0.5 rounded bg-slate-800/80 font-mono text-amber-300">"chatbot"</span>
+              <span className="px-1.5 py-0.5 rounded bg-slate-800/80 font-mono text-amber-300">"read aloud"</span>
+            </div>
           </div>
         )}
       </div>
