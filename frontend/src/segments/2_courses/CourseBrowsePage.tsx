@@ -48,6 +48,20 @@ export const CourseBrowsePage: React.FC = () => {
     }
   }, [user]);
 
+  useEffect(() => {
+    const handleVoiceSearch = (e: any) => {
+      const phrase = e.detail;
+      if (!phrase) return;
+      // Skip navigation phrases
+      if (['courses', 'profile', 'home', 'chatbot', 'camera', 'read aloud', 'stop', 'admin', 'trainer'].includes(phrase.toLowerCase().trim())) {
+        return;
+      }
+      setSearch(phrase);
+    };
+    window.addEventListener('imd-voice-general', handleVoiceSearch);
+    return () => window.removeEventListener('imd-voice-general', handleVoiceSearch);
+  }, []);
+
   const filteredCourses = courses.filter((c) => {
     const matchSearch =
       c.title.toLowerCase().includes(search.toLowerCase()) ||

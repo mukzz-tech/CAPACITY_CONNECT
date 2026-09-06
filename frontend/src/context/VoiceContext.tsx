@@ -16,6 +16,47 @@ interface VoiceContextType {
 
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 
+// Auto-fill active input or textarea on the page with spoken words
+export const fillActiveInput = (text: string): boolean => {
+  try {
+    const el = document.activeElement;
+    if (!el) return false;
+
+    if (el instanceof HTMLInputElement && ['text', 'search', 'email', 'url', ''].includes(el.type)) {
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value'
+      )?.set;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(el, text);
+      } else {
+        el.value = text;
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+
+    if (el instanceof HTMLTextAreaElement) {
+      const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value'
+      )?.set;
+      if (nativeTextAreaValueSetter) {
+        nativeTextAreaValueSetter.call(el, text);
+      } else {
+        el.value = text;
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+  } catch (e) {
+    console.warn('Auto-fill input error:', e);
+  }
+  return false;
+};
+
 export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(() => {
     try {
@@ -410,9 +451,16 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return true;
     }
 
-    // 16. General voice input broadcast (for assessments / forms)
+    // 16. Auto-Fill Active Input Box on Screen (dictation / filling boxes)
+    const filledActive = fillActiveInput(phrase);
+    if (filledActive) {
+      playTone(720, 0.08);
+      console.log('[Auto-Filled Active Input]:', phrase);
+    }
+
+    // 17. General voice input broadcast (for assessments / chatbot / search)
     window.dispatchEvent(new CustomEvent('imd-voice-general', { detail: phrase }));
-    return false;
+    return filledActive;
   };
 
   // Robust, continuous SpeechRecognition instance
@@ -658,10 +706,31 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   useEffect(() => {
-    if (isVoiceActive) {
-      isVoiceActiveRef.current = true;
-      startNewListeningSession();
-    }
+    const initVoice = async () => {
+      const saved = localStorage.getItem('imd_voice_active');
+      if (saved === 'true') {
+        setIsVoiceActive(true);
+        isVoiceActiveRef.current = true;
+        startNewListeningSession();
+        return;
+      }
+
+      // If user has already granted microphone permissions, auto-activate hands-free listening
+      if (saved === null && navigator.permissions?.query) {
+        try {
+          const perm = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+          if (perm.state === 'granted') {
+            setIsVoiceActive(true);
+            isVoiceActiveRef.current = true;
+            localStorage.setItem('imd_voice_active', 'true');
+            startNewListeningSession();
+          }
+        } catch (e) {}
+      }
+    };
+
+    initVoice();
+
     return () => {
       stopActiveSession();
     };

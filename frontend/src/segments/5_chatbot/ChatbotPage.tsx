@@ -53,6 +53,22 @@ export const ChatbotPage: React.FC = () => {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    const handleVoiceDictation = (e: any) => {
+      const phrase = e.detail;
+      if (!phrase) return;
+      // Skip navigation phrases
+      if (['courses', 'profile', 'home', 'chatbot', 'camera', 'read aloud', 'stop'].includes(phrase.toLowerCase().trim())) {
+        return;
+      }
+      const clean = phrase.replace(/^(ask|question|doubt|search|tell me)\s*/i, '').trim();
+      setInput(clean);
+      playTone(650, 0.08);
+    };
+    window.addEventListener('imd-voice-general', handleVoiceDictation);
+    return () => window.removeEventListener('imd-voice-general', handleVoiceDictation);
+  }, []);
+
   const chatbotAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const speakAloud = (text: string) => {

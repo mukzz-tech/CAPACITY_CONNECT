@@ -203,7 +203,7 @@ export const AssessmentPage: React.FC = () => {
       }
     };
 
-    // Hands-Free Event: General Spoken Input (Fill in the blank / Voice Answer)
+    // Hands-Free Event: General Spoken Input (Fill in the blank / Voice Answer / MCQ Choice Match)
     const handleVoiceGeneral = (e: any) => {
       const phrase = e.detail;
       if (!phrase || !assessmentRef.current?.questions?.length) return;
@@ -211,11 +211,34 @@ export const AssessmentPage: React.FC = () => {
       const currIdx = activeQuestionIndexRef.current;
       const currQ = questions[currIdx];
 
-      if (currQ && (currQ.questionType === 'FILL_BLANK' || currQ.questionType === 'VOICE_ANSWER')) {
-        setSubmissions((prev) => ({ ...prev, [currQ.id]: phrase }));
-        setIsVoiceFlag((prev) => ({ ...prev, [currQ.id]: true }));
-        playTone(650, 0.1);
-        speakText(`Answer recorded: ${phrase}`);
+      // Strip common answer-prefix phrases like "the answer is", "my answer is", "answer is", "उत्तर है"
+      const cleanAnswer = phrase
+        .replace(/^(the answer is|my answer is|answer is|it is|it's|उत्तर है|मेरा उत्तर है)\s*/i, '')
+        .trim();
+
+      if (currQ) {
+        if (currQ.questionType === 'FILL_BLANK' || currQ.questionType === 'VOICE_ANSWER') {
+          setSubmissions((prev) => ({ ...prev, [currQ.id]: cleanAnswer }));
+          setIsVoiceFlag((prev) => ({ ...prev, [currQ.id]: true }));
+          playTone(650, 0.1);
+          speakText(`Filled answer: ${cleanAnswer}`);
+        } else if (currQ.questionType === 'MCQ' && currQ.options) {
+          // Check if spoken text matches an option's text or option letter
+          const lower = cleanAnswer.toLowerCase();
+          for (const opt of currQ.options) {
+            if (
+              lower === opt.id.toLowerCase() ||
+              lower.includes(`option ${opt.id.toLowerCase()}`) ||
+              lower.includes(opt.text.toLowerCase().substring(0, 15))
+            ) {
+              setSubmissions((prev) => ({ ...prev, [currQ.id]: opt.id }));
+              setIsVoiceFlag((prev) => ({ ...prev, [currQ.id]: true }));
+              playTone(650, 0.1);
+              speakText(`Selected option ${opt.id}`);
+              break;
+            }
+          }
+        }
       }
     };
 

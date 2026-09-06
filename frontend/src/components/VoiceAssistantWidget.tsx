@@ -154,12 +154,12 @@ export const VoiceAssistantWidget: React.FC = () => {
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white"></span>
               </span>
               <Mic className="w-4 h-4 text-white" />
-              <span className="font-bold">Voice: Active</span>
+              <span className="font-bold">Voice: Active (Listening)</span>
             </>
           ) : (
             <>
               <MicOff className="w-4 h-4 opacity-90" />
-              <span className="font-semibold">Turn On Voice Command</span>
+              <span className="font-semibold">Turn On Voice (Command & Fill Box)</span>
             </>
           )}
         </button>
@@ -175,11 +175,11 @@ export const VoiceAssistantWidget: React.FC = () => {
             </div>
 
             {/* Live Transcript / Feedback Ticker */}
-            <div className="max-w-[220px] truncate px-2 text-xs text-slate-200">
+            <div className="max-w-[240px] truncate px-2 text-xs text-slate-200">
               {lastRecognizedPhrase ? (
                 <span className="text-amber-300 font-mono font-medium">"{lastRecognizedPhrase}"</span>
               ) : (
-                <span className="text-slate-400 animate-pulse text-[11px]">Listening for command...</span>
+                <span className="text-slate-400 animate-pulse text-[11px]">🎙️ Speak command or talk to fill box...</span>
               )}
             </div>
 
