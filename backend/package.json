@@ -10,10 +10,16 @@
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
+    "supabase:push": "prisma db push --schema=prisma/schema.supabase.prisma",
+    "supabase:generate": "prisma generate --schema=prisma/schema.supabase.prisma",
+    "supabase:test": "tsx scripts/test-supabase.ts",
+    "db:use-supabase": "node scripts/switch-db.js supabase",
+    "db:use-sqlite": "node scripts/switch-db.js sqlite",
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@supabase/supabase-js": "^2.115.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

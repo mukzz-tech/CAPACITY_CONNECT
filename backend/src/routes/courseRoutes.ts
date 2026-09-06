@@ -233,10 +233,15 @@ router.post('/:id/submit-review', authenticate, requireRole([UserRole.TRAINER, U
 });
 
 // 7. Trainee: Enroll in Course
-router.post('/:id/enroll', authenticate, requireRole([UserRole.TRAINEE, UserRole.ADMIN]), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+router.post('/:id/enroll', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const courseId = req.params.id;
     const userId = req.user!.userId;
+
+    if (req.user?.role === UserRole.TRAINER) {
+      res.status(403).json({ error: 'Trainers are instructors and cannot enroll as trainees. Use Trainer Studio to author and manage courses.' });
+      return;
+    }
 
     const existing = await prisma.enrollment.findUnique({
       where: { userId_courseId: { userId, courseId } },

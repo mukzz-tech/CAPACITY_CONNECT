@@ -174,7 +174,30 @@ export const CourseDetailPage: React.FC = () => {
 
             {/* Enrollment Action Box */}
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 min-w-[280px] text-center">
-              {isEnrolled ? (
+              {user?.role === 'TRAINER' ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-center gap-2 text-indigo-700 font-bold text-sm">
+                    <BookOpen className="w-5 h-5" />
+                    <span>Trainer View</span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    As an IMD Trainer / Instructor, you author and review curriculum. Enrollment is reserved for trainees.
+                  </p>
+                  <Link
+                    to={`/courses/${course.id}/study`}
+                    className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs flex items-center justify-center gap-2 transition shadow-md shadow-blue-600/30"
+                  >
+                    <Play className="w-4 h-4" />
+                    <span>Preview Study Material</span>
+                  </Link>
+                  <Link
+                    to="/trainer"
+                    className="w-full py-2 px-3 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-medium transition block text-center"
+                  >
+                    Open Trainer Studio
+                  </Link>
+                </div>
+              ) : isEnrolled ? (
                 <div className="space-y-4">
                   <div className="flex items-center justify-center gap-2 text-emerald-700 font-bold text-sm">
                     <CheckCircle2 className="w-5 h-5" />

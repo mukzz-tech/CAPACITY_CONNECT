@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { CloudSun, LogIn, Lock, Mail, AlertCircle, Sparkles } from 'lucide-react';
+import { CloudSun, LogIn, Lock, Mail, AlertCircle } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -26,12 +26,6 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const fillCredentials = (userEmail: string, userPass: string) => {
-    setEmail(userEmail);
-    setPassword(userPass);
-    setError(null);
-  };
-
   return (
     <div className="min-h-[80vh] flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
@@ -54,51 +48,6 @@ export const LoginPage: React.FC = () => {
               <span>{error}</span>
             </div>
           )}
-
-          {/* 1-Click Evaluation Credentials */}
-          <div className="mb-6 p-3 bg-blue-50/80 border border-blue-200 rounded-xl">
-            <div className="flex items-center gap-1.5 text-blue-900 text-xs font-semibold mb-2">
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              <span>1-Click Evaluator Logins:</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <button
-                type="button"
-                onClick={() => fillCredentials('admin@imd.gov.in', 'ImdAdmin@2026')}
-                className="p-1.5 rounded bg-white hover:bg-blue-100/60 border border-blue-200 text-left font-medium text-slate-700 transition"
-              >
-                <span className="block font-bold text-purple-700">Admin</span>
-                <span className="text-[10px] text-slate-500">admin@imd.gov.in</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => fillCredentials('trainer.jenamani@imd.gov.in', 'Password@123')}
-                className="p-1.5 rounded bg-white hover:bg-blue-100/60 border border-blue-200 text-left font-medium text-slate-700 transition"
-              >
-                <span className="block font-bold text-emerald-700">Trainer (Dr. Jenamani)</span>
-                <span className="text-[10px] text-slate-500">trainer.jenamani...</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => fillCredentials('trainee.rajesh@imd.gov.in', 'Password@123')}
-                className="p-1.5 rounded bg-white hover:bg-blue-100/60 border border-blue-200 text-left font-medium text-slate-700 transition"
-              >
-                <span className="block font-bold text-blue-700">Trainee (Rajesh)</span>
-                <span className="text-[10px] text-slate-500">trainee.rajesh...</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => fillCredentials('trainee.amit@imd.gov.in', 'Password@123')}
-                className="p-1.5 rounded bg-white hover:bg-blue-100/60 border border-blue-200 text-left font-medium text-slate-700 transition"
-              >
-                <span className="block font-bold text-amber-700">Pending Trainee (Amit)</span>
-                <span className="text-[10px] text-slate-500">trainee.amit...</span>
-              </button>
-            </div>
-          </div>
 
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div>

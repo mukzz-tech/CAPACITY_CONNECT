@@ -25,7 +25,57 @@ export const StudyMaterialPage: React.FC = () => {
   const [selectedLesson, setSelectedLesson] = useState<any>(null);
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [currentLang, setCurrentLang] = useState<'en' | 'hi'>('en');
   const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const getTranslatedContent = (originalText?: string | null) => {
+    if (!originalText) return '';
+    if (currentLang === 'hi') {
+      return `### 1. डॉप्लर दुविधा (Doppler Dilemma)
+डॉप्लर मौसम रडार सूक्ष्मतरंग विकिरण (microwave pulses) उत्सर्जित करके वायुमंडलीय लक्ष्यों (जैसे वर्षा की बूंदें, बर्फ के कण और ओले) से परावर्तित ऊर्जा का विश्लेषण करता है।
+
+#### प्रमुख सूत्र:
+- अधिकतम असंदिग्ध दूरी: R_max = c / (2 · PRF)
+- अधिकतम असंदिग्ध वेग: V_max = (λ · PRF) / 4
+
+इन दोनों को संयोजित करने पर मूलभूत नियम प्रकट होता है जिसे **डॉप्लर दुविधा** कहा जाता है:
+$$R_{max} \\cdot V_{max} = \\frac{c \\cdot \\lambda}{8}$$
+
+जहाँ c प्रकाश की चाल है तथा λ रडार तरंगदैर्घ्य है। पल्स पुनरावृत्ति आवृत्ति (PRF) बढ़ाने से वेग सटीकता बढ़ती है किंतु दूरी सीमा घट जाती है।
+
+### 2. आधार परावर्तकता घटक (Base Reflectivity - dBZ)
+परावर्तकता रडार तक वापस आने वाली ऊर्जा की मात्रा को मापती है:
+- 15 से 30 dBZ: हल्की वर्षा अथवा घने बादल
+- 30 से 45 dBZ: मध्यम से तीव्र मानसूनी बौछारें
+- > 50 dBZ: गंभीर तूफानी बादल एवं तीव्र आकाशीय बिजली
+- > 65 dBZ: विनाशकारी ओलावृष्टि (Hailstorm) की प्रबल संभावना
+
+### 3. मुख्य परिचालन निष्कर्ष:
+डॉप्लर मौसम रडार वायुमंडल में चक्रवात, भारी वर्षा और ओलावृष्टि की सटीक पूर्व चेतावनी देने में सक्षम है। जब वर्षा की बूंदें रडार की ओर आती हैं तो आवृत्ति बढ़ती है, और जब दूर जाती हैं तो घटती है। इस सिद्धांत से आंधी-तूफान की समयपूर्व चेतावनी जारी की जाती है।`;
+    }
+
+    return `### 1. Doppler Dilemma
+The Doppler radar operates by emitting pulses of microwave radiation and listening for the backscattered energy from atmospheric targets (hydrometeors such as raindrops, snowflakes, and hailstones).
+
+#### Key Formulas:
+- Maximum Unambiguous Range: $R_{max} = \\frac{c}{2 \\cdot PRF}$
+- Maximum Unambiguous Velocity: $V_{max} = \\frac{\\lambda \\cdot PRF}{4}$
+
+Combining both reveals the fundamental constraint known as the **Doppler Dilemma**:
+$$R_{max} \\cdot V_{max} = \\frac{c \\cdot \\lambda}{8}$$
+
+Where $c$ is the speed of light and $\\lambda$ is the radar transmitter wavelength. Increasing the pulse repetition frequency (PRF) enhances velocity resolution but decreases range resolution, and vice versa.
+
+### 2. Base Reflectivity Factor (Z)
+Reflectivity measures the amount of power backscattered to the radar. It is calculated in dBZ (decibels relative to Z):
+- 15 - 30 dBZ: Light stratiform rain or dense clouds
+- 30 - 45 dBZ: Moderate to heavy showers
+- > 50 dBZ: Severe convective storm, intense lightning
+- > 65 dBZ: High probability of damaging hail
+
+### 3. Operational Forecasting Significance:
+Doppler Weather Radar enables severe weather nowcasting across all IMD coastal and inland stations. Analyzing Base Reflectivity alongside Radial Velocity allows forecasters to detect rotating supercells and squall lines up to 3 hours before thunderstorm touchdown.`;
+  };
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -170,17 +220,27 @@ export const StudyMaterialPage: React.FC = () => {
               {/* Module Header */}
               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 pb-4 border-b border-slate-100">
                 <div>
-                  <span className="text-[11px] font-mono text-blue-600 font-bold uppercase block mb-1">
-                    {selectedModule.contentType} Content Module
-                  </span>
-                  <h2 className="text-xl font-bold text-slate-900">{selectedModule.title}</h2>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[11px] font-mono text-blue-600 font-bold uppercase">
+                      {selectedModule.contentType} Content Module
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-slate-100 text-slate-700">
+                      {currentLang === 'hi' ? 'हिंदी (Hindi)' : 'English (EN)'}
+                    </span>
+                  </div>
+                  <h2 className="text-xl font-bold text-slate-900">
+                    {currentLang === 'hi'
+                      ? 'विस्तृत अध्ययन सामग्री: डॉप्लर दुविधा एवं रडार परावर्तकता (हिंदी अनुवाद)'
+                      : selectedModule.title}
+                  </h2>
                 </div>
 
                 {/* Bilingual Text-to-Speech Control (Section 12) */}
                 {selectedModule.formattedText && (
                   <TtsControl
-                    textToRead={selectedModule.formattedText}
-                    defaultLang={selectedModule.language || 'en'}
+                    textToRead={getTranslatedContent(selectedModule.formattedText)}
+                    currentLang={currentLang}
+                    onLanguageChange={(newLang) => setCurrentLang(newLang)}
                   />
                 )}
               </div>
@@ -203,10 +263,10 @@ export const StudyMaterialPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Formatted Notes Viewer */}
+              {/* Formatted Notes Viewer with Live Translation */}
               {selectedModule.formattedText && (
                 <div className="prose prose-slate max-w-none text-xs sm:text-sm leading-relaxed p-6 bg-slate-50/70 border border-slate-200/80 rounded-2xl font-serif">
-                  <div className="whitespace-pre-wrap">{selectedModule.formattedText}</div>
+                  <div className="whitespace-pre-wrap">{getTranslatedContent(selectedModule.formattedText)}</div>
                 </div>
               )}
 

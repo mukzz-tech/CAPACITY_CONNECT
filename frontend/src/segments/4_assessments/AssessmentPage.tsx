@@ -80,28 +80,109 @@ export const AssessmentPage: React.FC = () => {
     });
   };
 
-  const handleVoiceAnswer = (questionId: string) => {
+  const playChime = (freq = 550) => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    } catch (e) {}
+  };
+
+  const speakFeedback = (text: string) => {
+    try {
+      if (!('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {}
+  };
+
+  const handleVoiceAnswer = async (questionId: string, qType = 'VOICE_ANSWER', options?: Array<{ id: string; text: string }>) => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert('Speech Recognition is not available in this browser.');
+      alert('Speech Recognition is not available in this browser. Please use Google Chrome or Microsoft Edge.');
+      return;
+    }
+
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+      }
+    } catch (micErr) {
+      alert('Microphone permission is required to capture your voice answer. Please allow microphone access in your browser.');
       return;
     }
 
     setVoiceRecordingForQ(questionId);
+    playChime(600);
+    speakFeedback('Listening. Speak your answer now.');
+
     const recognition = new SpeechRecognition();
     recognition.lang = 'en-US';
     recognition.interimResults = false;
 
     recognition.onresult = (event: any) => {
       const spokenText = event.results[0][0].transcript.trim();
-      setSubmissions((prev) => ({ ...prev, [questionId]: spokenText }));
-      setIsVoiceFlag((prev) => ({ ...prev, [questionId]: true }));
+      playChime(700);
+
+      if (qType === 'MCQ' && options) {
+        const lower = spokenText.toLowerCase();
+        let selected: string | null = null;
+
+        // Check for "option A", "A", etc.
+        for (const opt of options) {
+          const optLetter = opt.id.toLowerCase();
+          if (
+            lower === optLetter ||
+            lower.includes(`option ${optLetter}`) ||
+            lower.startsWith(`option ${optLetter}`) ||
+            lower.includes(opt.text.toLowerCase().substring(0, 15))
+          ) {
+            selected = opt.id;
+            break;
+          }
+        }
+
+        if (selected) {
+          setSubmissions((prev) => ({ ...prev, [questionId]: selected }));
+          setIsVoiceFlag((prev) => ({ ...prev, [questionId]: true }));
+          speakFeedback(`Selected Option ${selected}`);
+        } else {
+          // If no option letter matched directly, check first letter of spoken text
+          const firstChar = spokenText.charAt(0).toUpperCase();
+          if (['A', 'B', 'C', 'D'].includes(firstChar)) {
+            setSubmissions((prev) => ({ ...prev, [questionId]: firstChar }));
+            setIsVoiceFlag((prev) => ({ ...prev, [questionId]: true }));
+            speakFeedback(`Selected Option ${firstChar}`);
+          } else {
+            speakFeedback(`Heard: ${spokenText}. Please say Option A, B, C, or D.`);
+          }
+        }
+      } else {
+        // Fill in the blank or Voice Answer
+        setSubmissions((prev) => ({ ...prev, [questionId]: spokenText }));
+        setIsVoiceFlag((prev) => ({ ...prev, [questionId]: true }));
+        speakFeedback(`Answer recorded: ${spokenText}`);
+      }
+
       setVoiceRecordingForQ(null);
     };
 
-    recognition.onerror = () => {
+    recognition.onerror = (err: any) => {
+      console.warn('Voice recognition error:', err);
       setVoiceRecordingForQ(null);
     };
 
@@ -109,7 +190,11 @@ export const AssessmentPage: React.FC = () => {
       setVoiceRecordingForQ(null);
     };
 
-    recognition.start();
+    try {
+      recognition.start();
+    } catch (e) {
+      setVoiceRecordingForQ(null);
+    }
   };
 
   const handleSubmitAttempt = async () => {
@@ -313,6 +398,24 @@ export const AssessmentPage: React.FC = () => {
                 {/* 1. MCQ Renderer */}
                 {q.questionType === 'MCQ' && q.options && (
                   <div className="space-y-2 pt-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] text-slate-500">Select one option or speak your choice:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleVoiceAnswer(q.id, 'MCQ', q.options)}
+                        disabled={voiceRecordingForQ === q.id}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold transition ${
+                          voiceRecordingForQ === q.id
+                            ? 'bg-red-600 text-white animate-pulse'
+                            : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                        }`}
+                        title="Speak option letter (e.g. 'Option B')"
+                      >
+                        <Mic className="w-3.5 h-3.5" />
+                        <span>{voiceRecordingForQ === q.id ? 'Listening...' : 'Speak Choice (e.g. "Option B")'}</span>
+                      </button>
+                    </div>
+
                     {q.options.map((opt) => (
                       <label
                         key={opt.id}
@@ -329,20 +432,41 @@ export const AssessmentPage: React.FC = () => {
                         <span>{opt.text}</span>
                       </label>
                     ))}
+                    {isVoiceFlag[q.id] && (
+                      <span className="text-[10px] text-indigo-600 font-mono block mt-1">
+                        Voice Answer Selected: Option {submissions[q.id]}
+                      </span>
+                    )}
                   </div>
                 )}
 
                 {/* 2. Fill-in-the-Blank Renderer */}
                 {q.questionType === 'FILL_BLANK' && (
-                  <div className="pt-2">
-                    <input
-                      type="text"
-                      placeholder="Type your answer here (case-insensitive)..."
-                      value={submissions[q.id] || ''}
-                      onChange={(e) => handleTextChange(q.id, e.target.value)}
-                      className="w-full text-xs rounded-xl border border-slate-300 p-3 focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-                    />
-                    <span className="text-[10px] text-slate-400 mt-1 block">
+                  <div className="pt-2 space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Type answer or speak via microphone..."
+                        value={submissions[q.id] || ''}
+                        onChange={(e) => handleTextChange(q.id, e.target.value)}
+                        className="flex-1 text-xs rounded-xl border border-slate-300 p-3 focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleVoiceAnswer(q.id, 'FILL_BLANK')}
+                        disabled={voiceRecordingForQ === q.id}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition ${
+                          voiceRecordingForQ === q.id
+                            ? 'bg-red-600 text-white animate-pulse shadow-md'
+                            : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                        }`}
+                        title="Speak answer into microphone"
+                      >
+                        <Mic className="w-4 h-4" />
+                        <span>{voiceRecordingForQ === q.id ? 'Listening...' : 'Speak'}</span>
+                      </button>
+                    </div>
+                    <span className="text-[10px] text-slate-400 block">
                       Spelling variants and case differences are accepted automatically.
                     </span>
                   </div>
@@ -383,32 +507,37 @@ export const AssessmentPage: React.FC = () => {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Mic className="w-4 h-4 text-indigo-700" />
-                        <span className="text-xs font-bold text-indigo-900">Voice-Answer Input</span>
+                        <span className="text-xs font-bold text-indigo-900">Spoken Answer Input</span>
                       </div>
 
                       <button
                         type="button"
-                        onClick={() => handleVoiceAnswer(q.id)}
+                        onClick={() => handleVoiceAnswer(q.id, 'VOICE_ANSWER')}
                         disabled={voiceRecordingForQ === q.id}
-                        className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition ${
+                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition ${
                           voiceRecordingForQ === q.id
-                            ? 'bg-red-600 text-white animate-pulse'
-                            : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                            ? 'bg-red-600 text-white animate-pulse shadow-md shadow-red-500/30'
+                            : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
                         }`}
                       >
-                        <Mic className="w-3 h-3" />
-                        <span>{voiceRecordingForQ === q.id ? 'Listening...' : 'Speak Spoken Answer'}</span>
+                        <Mic className="w-3.5 h-3.5" />
+                        <span>{voiceRecordingForQ === q.id ? 'Listening... Speak Answer' : 'Speak Spoken Answer'}</span>
                       </button>
                     </div>
 
-                    <div className="p-2.5 bg-white border border-indigo-200 rounded-lg text-xs text-slate-700 min-h-[36px] flex items-center">
-                      {submissions[q.id] ? (
-                        <span className="text-indigo-950 font-medium">
-                          Spoken Transcription: <strong>"{submissions[q.id]}"</strong>
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 italic">Click Speak to capture your meteorological response</span>
-                      )}
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Click Speak to record your answer, or type here..."
+                        value={submissions[q.id] || ''}
+                        onChange={(e) => handleTextChange(q.id, e.target.value)}
+                        className="w-full text-xs rounded-xl border border-indigo-300 p-3 bg-white font-medium focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+                      />
+                      <span className="text-[10px] text-slate-500 mt-1 block">
+                        {submissions[q.id]
+                          ? `Recorded Spoken Text: "${submissions[q.id]}"`
+                          : 'Speak clearly into microphone (e.g. "cumulonimbus").'}
+                      </span>
                     </div>
                   </div>
                 )}

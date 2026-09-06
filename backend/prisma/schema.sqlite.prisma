@@ -1,0 +1,339 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id              String             @id @default(uuid())
+  email           String             @unique
+  passwordHash    String
+  role            String             @default("TRAINEE") // "TRAINEE" | "TRAINER" | "ADMIN"
+  requestedRole   String             @default("TRAINEE")
+  approvalStatus  String             @default("PENDING") // "PENDING" | "APPROVED" | "REJECTED"
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  profile         Profile?
+  createdCourses  Course[]           @relation("TrainerCourses")
+  enrollments     Enrollment[]
+  attempts        AssessmentAttempt[]
+  certificates    Certificate[]
+  feedbacks       Feedback[]
+  chatSessions    ChatSession[]
+  voiceLogs       VoiceCommandLog[]
+  adminAuditLogs  AuditLog[]         @relation("AdminAudits")
+  targetAuditLogs AuditLog[]         @relation("TargetAudits")
+}
+
+model Profile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName        String
+  jobDesignation  String   // e.g. "Scientific Assistant", "Meteorologist Gr-II"
+  department      String?  // e.g. "Regional Meteorological Centre, Chennai"
+  yearsExperience Float    @default(0.0)
+  qualifications  String?  // JSON string array of qualifications
+  skills          String?  // JSON string array of skills
+  avatarUrl       String?
+  languagePref    String   @default("en") // "en" | "hi"
+  voiceOptIn      Boolean  @default(false)
+  proctoringOptIn Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Competency {
+  id               String              @id @default(uuid())
+  code             String              @unique // e.g. "MET-RADAR-01"
+  name             String              // e.g. "Doppler Radar Interpretation"
+  description      String
+  category         String              // e.g. "Instruments", "Forecasting", "Aviation"
+  courses          CourseCompetency[]
+  roleRequirements RoleCompetency[]
+  trainerSkills    TrainerCompetency[]
+}
+
+model RoleCompetency {
+  id             String     @id @default(uuid())
+  jobDesignation String     // matches Profile.jobDesignation
+  competencyId   String
+  competency     Competency @relation(fields: [competencyId], references: [id], onDelete: Cascade)
+
+  @@unique([jobDesignation, competencyId])
+}
+
+model TrainerCompetency {
+  id           String     @id @default(uuid())
+  trainerId    String
+  competencyId String
+  competency   Competency @relation(fields: [competencyId], references: [id], onDelete: Cascade)
+
+  @@unique([trainerId, competencyId])
+}
+
+model Course {
+  id              String               @id @default(uuid())
+  code            String               @unique // e.g. "IMD-MET-GR2"
+  title           String
+  description     String
+  durationWeeks   Int                  @default(1)
+  isLongDuration  Boolean              @default(false)
+  status          String               @default("DRAFT") // "DRAFT" | "PENDING_REVIEW" | "PUBLISHED" | "REJECTED"
+  adminReviewNote String?
+  trainerId       String
+  trainer         User                 @relation("TrainerCourses", fields: [trainerId], references: [id])
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  competencies    CourseCompetency[]
+  prerequisites   CoursePrerequisite[] @relation("TargetCourse")
+  prereqFor       CoursePrerequisite[] @relation("PrereqCourse")
+  lessons         Lesson[]
+  enrollments     Enrollment[]
+  certificates    Certificate[]
+  feedbacks       Feedback[]
+}
+
+model CoursePrerequisite {
+  id                   String @id @default(uuid())
+  courseId             String
+  course               Course @relation("TargetCourse", fields: [courseId], references: [id], onDelete: Cascade)
+  prerequisiteCourseId String
+  prerequisiteCourse   Course @relation("PrereqCourse", fields: [prerequisiteCourseId], references: [id], onDelete: Cascade)
+  minYearsExpRequired  Float  @default(0.0)
+
+  @@unique([courseId, prerequisiteCourseId])
+}
+
+model CourseCompetency {
+  id           String     @id @default(uuid())
+  courseId     String
+  course       Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  competencyId String
+  competency   Competency @relation(fields: [competencyId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, competencyId])
+}
+
+model Lesson {
+  id          String       @id @default(uuid())
+  courseId    String
+  course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  sequence    Int
+  title       String
+  description String?
+  modules     Module[]
+  assessments Assessment[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([courseId, sequence])
+}
+
+model Module {
+  id            String   @id @default(uuid())
+  lessonId      String
+  lesson        Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  sequence      Int
+  title         String
+  contentType   String   // "VIDEO" | "NOTES_DOC" | "NOTES_TEXT" | "AUDIO"
+  fileUrl       String?
+  fileSize      Int?
+  mimeType      String?
+  formattedText String?  // Rich text for formatted notes
+  language      String   @default("en") // "en" | "hi" for TTS
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Assessment {
+  id                String              @id @default(uuid())
+  lessonId          String
+  lesson            Lesson              @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  title             String
+  description       String?
+  passingPercent    Float               @default(50.0)
+  isStrictProctored Boolean             @default(true)
+  questions         Question[]
+  attempts          AssessmentAttempt[]
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+}
+
+model Question {
+  id            String     @id @default(uuid())
+  assessmentId  String
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  sequence      Int
+  questionType  String     // "MCQ" | "FILL_BLANK" | "MATCH_FOLLOWING" | "VOICE_ANSWER"
+  prompt        String
+  marks         Float      @default(1.0)
+  options       String?    // JSON string: [{ id: "A", text: "Option A" }, ...]
+  correctOption String?    // "A"
+  acceptedTexts String?    // JSON string: ["cumulonimbus", "Cb cloud"]
+  matchPairs    String?    // JSON string: [{ left: "Anemometer", right: "Wind Speed" }]
+  voiceKeyword  String?    // Accepted spoken keyword/phrase
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+model Enrollment {
+  id              String           @id @default(uuid())
+  userId          String
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId        String
+  course          Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  enrolledAt      DateTime         @default(now())
+  completedAt     DateTime?
+  finalScore      Float?           // Sole grade: arithmetic mean of lesson assessment scores
+  grade           String?          // "OUTSTANDING" | "EXCELLENT" | "VERY_GOOD" | "GOOD" | "PASSED" | "FAILED"
+  progressPercent Float            @default(0.0)
+  lessonProgress  LessonProgress[]
+
+  @@unique([userId, courseId])
+}
+
+model LessonProgress {
+  id           String     @id @default(uuid())
+  enrollmentId String
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  lessonId     String
+  isCompleted  Boolean    @default(false)
+  scoreEarned  Float?
+  completedAt  DateTime?
+
+  @@unique([enrollmentId, lessonId])
+}
+
+model AssessmentAttempt {
+  id             String          @id @default(uuid())
+  assessmentId   String
+  assessment     Assessment      @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scoreAchieved  Float           @default(0.0)
+  maxScore       Float           @default(0.0)
+  percentage     Float           @default(0.0)
+  integrityScore Float           @default(100.0)
+  submittedAt    DateTime        @default(now())
+  answers        AttemptAnswer[]
+  proctorFlags   ProctoringFlag[]
+}
+
+model AttemptAnswer {
+  id            String            @id @default(uuid())
+  attemptId     String
+  attempt       AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId    String
+  givenAnswer   String            // JSON string
+  marksAwarded  Float             @default(0.0)
+  isVoiceAnswer Boolean           @default(false)
+}
+
+model ProctoringFlag {
+  id          String            @id @default(uuid())
+  attemptId   String
+  attempt     AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  flagType    String            // "NO_FACE_DETECTED" | "FACE_TURNED_AWAY" | "MULTIPLE_FACES_DETECTED"
+  timestamp   DateTime          @default(now())
+  durationSec Float             @default(0.0)
+  deduction   Float             @default(0.0)
+  metaDetails String?
+}
+
+model Certificate {
+  id              String   @id @default(uuid())
+  certificateCode String   @unique // e.g. "CERT-IMD-2026-XXXXX"
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId        String
+  course          Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  traineeName     String
+  courseTitle     String
+  finalScore      Float
+  grade           String   // "OUTSTANDING" | "EXCELLENT" | "VERY_GOOD" | "GOOD" | "PASSED"
+  issueDate       DateTime @default(now())
+  qrCodeUrl       String   // e.g. "http://localhost:5173/verify/CERT-IMD-2026-XXXXX"
+  pdfFileUrl      String   // URL or base64 data URL
+}
+
+model Feedback {
+  id                 String   @id @default(uuid())
+  courseId           String
+  course             Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  userId             String   // Anonymized in views
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseContent      Float    // 0.0 - 10.0
+  facultyInteraction Float    // 0.0 - 10.0
+  usefulness         Float    // 0.0 - 10.0
+  infrastructure     Float    // 0.0 - 10.0
+  comments           String?
+  createdAt          DateTime @default(now())
+
+  @@unique([userId, courseId])
+}
+
+model Announcement {
+  id          String   @id @default(uuid())
+  title       String
+  content     String
+  isPublished Boolean  @default(true)
+  priority    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  adminId      String
+  admin        User     @relation("AdminAudits", fields: [adminId], references: [id])
+  actionType   String   // "USER_APPROVAL" | "ROLE_CHANGE" | "COURSE_PUBLISH" | "FLAG_REVIEW"
+  targetId     String?
+  targetUserId String?
+  targetUser   User?    @relation("TargetAudits", fields: [targetUserId], references: [id])
+  notes        String?
+  timestamp    DateTime @default(now())
+}
+
+model ChatSession {
+  id        String        @id @default(uuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String        @default("Meteorological Inquiry")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id        String      @id @default(uuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sender    String      // "user" | "assistant"
+  content   String
+  isCached  Boolean     @default(false)
+  createdAt DateTime    @default(now())
+}
+
+model VoiceCommandLog {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recognizedPhrase String
+  matchedAction    String?
+  isSuccessful     Boolean  @default(true)
+  timestamp        DateTime @default(now())
+}
+
+model FaqCache {
+  id        String   @id @default(uuid())
+  question  String   @unique
+  answer    String
+  category  String   @default("general")
+  createdAt DateTime @default(now())
+}

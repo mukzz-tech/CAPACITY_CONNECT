@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useVoice } from '../../context/VoiceContext';
 import {
   MessageSquare,
   Send,
@@ -10,6 +11,8 @@ import {
   HelpCircle,
   Database,
   CheckCircle,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 
 interface ChatMsg {
@@ -21,6 +24,7 @@ interface ChatMsg {
 
 export const ChatbotPage: React.FC = () => {
   const { user } = useAuth();
+  const { speakText, playTone } = useVoice();
   const [messages, setMessages] = useState<ChatMsg[]>([
     {
       sender: 'assistant',
@@ -31,6 +35,7 @@ export const ChatbotPage: React.FC = () => {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(true);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
   const faqQueries = [
@@ -48,6 +53,25 @@ export const ChatbotPage: React.FC = () => {
     scrollToBottom();
   }, [messages]);
 
+  const speakAloud = (text: string) => {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    // Clean markdown before speaking
+    const clean = text
+      .replace(/#+\s+/g, '')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/•\s*/g, '')
+      .replace(/`{1,3}(.*?)`{1,3}/g, '$1');
+
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.rate = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const matched = voices.find((v) => v.lang.includes('en'));
+    if (matched) utterance.voice = matched;
+    window.speechSynthesis.speak(utterance);
+  };
+
   const handleSend = async (textToSend?: string) => {
     const query = textToSend || input;
     if (!query.trim()) return;
@@ -56,6 +80,7 @@ export const ChatbotPage: React.FC = () => {
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setLoading(true);
+    playTone(480, 0.1);
 
     const token = localStorage.getItem('token');
     try {
@@ -78,35 +103,52 @@ export const ChatbotPage: React.FC = () => {
             isCached: data.isCached,
           },
         ]);
+        // Audibly speak out response if autoSpeak is enabled ("make noise")
+        if (autoSpeak) {
+          setTimeout(() => speakAloud(data.answer), 300);
+        }
       } else {
+        const errMsg = 'Sorry, I encountered an error while retrieving that meteorological information.';
         setMessages((prev) => [
           ...prev,
-          {
-            sender: 'assistant',
-            content: 'Sorry, I encountered an error while retrieving that meteorological information.',
-          },
+          { sender: 'assistant', content: errMsg },
         ]);
+        if (autoSpeak) speakAloud(errMsg);
       }
     } catch (e: any) {
+      const errMsg = `Network error: ${e.message}`;
       setMessages((prev) => [
         ...prev,
-        { sender: 'assistant', content: `Network error: ${e.message}` },
+        { sender: 'assistant', content: errMsg },
       ]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleVoiceQuery = () => {
+  const handleVoiceQuery = async () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert('Speech Recognition is not available in this browser.');
+      alert('Speech Recognition is not available in this browser. Please use Google Chrome or Microsoft Edge.');
+      return;
+    }
+
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+      }
+    } catch (e) {
+      alert('Please allow microphone permissions in your browser to speak your question.');
       return;
     }
 
     setIsRecording(true);
+    playTone(550, 0.15);
+    speakText('Listening for your meteorological doubt. Speak now.');
+
     const recognition = new SpeechRecognition();
     recognition.lang = 'en-US';
     recognition.interimResults = false;
@@ -115,12 +157,24 @@ export const ChatbotPage: React.FC = () => {
       const transcript = event.results[0][0].transcript;
       setInput(transcript);
       setIsRecording(false);
+      playTone(650, 0.15);
       handleSend(transcript);
     };
 
-    recognition.onerror = () => setIsRecording(false);
-    recognition.onend = () => setIsRecording(false);
-    recognition.start();
+    recognition.onerror = (err: any) => {
+      console.warn('Voice query error:', err);
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    try {
+      recognition.start();
+    } catch (e) {
+      setIsRecording(false);
+    }
   };
 
   return (
@@ -133,27 +187,50 @@ export const ChatbotPage: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-slate-900">IMD Meteorological AI Assistant</h1>
+              <h1 className="text-lg font-bold text-slate-900">IMD Meteorological AI Voice Assistant</h1>
               <span className="text-[10px] bg-emerald-100 text-emerald-800 font-mono font-bold px-2 py-0.5 rounded-full">
-                Context-Aware
+                Context-Aware & Voice-Enabled
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Instant responses powered by FAQ caching and role competency data (Section 14).
+              Speak or type doubts. Replies are answered and read aloud in real-time.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
-          <Database className="w-3.5 h-3.5 text-blue-600" />
-          <span>FAQ Cache Active (Zero-Cost)</span>
+        {/* Audio Speech Toggle */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setAutoSpeak(!autoSpeak);
+              if (autoSpeak) {
+                if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+              } else {
+                playTone(500, 0.1);
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition ${
+              autoSpeak
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-bold'
+                : 'bg-slate-50 border-slate-300 text-slate-600'
+            }`}
+            title="Toggle Voice Read Aloud Replies"
+          >
+            {autoSpeak ? <Volume2 className="w-3.5 h-3.5 text-emerald-600" /> : <VolumeX className="w-3.5 h-3.5 text-slate-400" />}
+            <span>{autoSpeak ? 'Audio Speech: ON' : 'Audio Speech: OFF'}</span>
+          </button>
+
+          <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
+            <Database className="w-3.5 h-3.5 text-blue-600" />
+            <span>FAQ Cache Active</span>
+          </div>
         </div>
       </div>
 
       {/* Suggested Quick Question Chips */}
       <div className="space-y-1.5">
         <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-          Frequent Meteorological Inquiries:
+          Frequent Meteorological Inquiries (Click to Ask):
         </span>
         <div className="flex flex-wrap gap-2">
           {faqQueries.map((faq, i) => (
@@ -191,10 +268,23 @@ export const ChatbotPage: React.FC = () => {
             >
               <div className="whitespace-pre-wrap">{m.content}</div>
 
-              {m.isCached && (
-                <div className="mt-2 pt-2 border-t border-slate-200 flex items-center gap-1 text-[10px] text-emerald-700 font-mono">
-                  <CheckCircle className="w-3 h-3 text-emerald-600" />
-                  <span>Served from High-Speed FAQ Cache (0 API Cost)</span>
+              {m.sender === 'assistant' && (
+                <div className="mt-3 pt-2 border-t border-slate-200/80 flex items-center justify-between text-[10px] text-slate-500">
+                  <button
+                    onClick={() => speakAloud(m.content)}
+                    className="flex items-center gap-1 text-blue-700 font-semibold hover:underline"
+                    title="Speak this answer aloud"
+                  >
+                    <Volume2 className="w-3 h-3" />
+                    <span>Play Voice</span>
+                  </button>
+
+                  {m.isCached && (
+                    <span className="flex items-center gap-1 text-emerald-700 font-mono">
+                      <CheckCircle className="w-3 h-3 text-emerald-600" />
+                      <span>FAQ Cached (0 Cost)</span>
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -212,7 +302,7 @@ export const ChatbotPage: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">
               <Bot className="w-4 h-4 animate-spin" />
             </div>
-            <span>Gathering competency gap & course context...</span>
+            <span>Gathering meteorological context & formulating audio reply...</span>
           </div>
         )}
 
@@ -224,14 +314,15 @@ export const ChatbotPage: React.FC = () => {
         <button
           type="button"
           onClick={handleVoiceQuery}
-          className={`p-2.5 rounded-xl transition ${
+          className={`p-2.5 rounded-xl transition flex items-center gap-1.5 text-xs font-semibold ${
             isRecording
-              ? 'bg-red-600 text-white animate-pulse'
-              : 'hover:bg-slate-100 text-slate-600'
+              ? 'bg-red-600 text-white animate-pulse shadow-md shadow-red-500/30'
+              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
           }`}
-          title="Speak your doubt via Speech-to-Text"
+          title="Speak your question directly"
         >
-          <Mic className="w-5 h-5" />
+          <Mic className="w-4 h-4" />
+          <span>{isRecording ? 'Listening...' : 'Speak'}</span>
         </button>
 
         <input
@@ -249,7 +340,7 @@ export const ChatbotPage: React.FC = () => {
           type="button"
           onClick={() => handleSend()}
           disabled={!input.trim() || loading}
-          className="p-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white transition disabled:opacity-50"
+          className="p-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white transition disabled:opacity-50 shadow-sm"
         >
           <Send className="w-4 h-4" />
         </button>

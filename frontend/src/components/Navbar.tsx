@@ -15,14 +15,11 @@ import {
   LogOut,
   LogIn,
   Sliders,
-  Sparkles,
-  ChevronDown,
 } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
-  const { user, logout, fastSwitchRole } = useAuth();
+  const { user, logout } = useAuth();
   const { isVoiceActive, toggleVoice, isListening, lastRecognizedPhrase } = useVoice();
-  const [showRoleMenu, setShowRoleMenu] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -31,7 +28,7 @@ export const Navbar: React.FC = () => {
   return (
     <header className="sticky top-0 z-50 bg-slate-900 border-b border-slate-800 shadow-md text-white">
       {/* Top Ministry Ribbon */}
-      <div className="bg-slate-950 px-4 py-1 text-xs border-b border-slate-800/60 flex justify-between items-center text-slate-400">
+      <div className="bg-slate-950 px-4 py-1.5 text-xs border-b border-slate-800/60 flex justify-between items-center text-slate-400">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-slate-300">भारत सरकार | Government of India</span>
           <span className="text-slate-600">•</span>
@@ -40,53 +37,8 @@ export const Navbar: React.FC = () => {
           <span className="text-amber-400 font-medium">SIH 2026 PS #26075</span>
         </div>
 
-        {/* Demo Fast Switcher Dropdown */}
-        <div className="relative">
-          <button
-            onClick={() => setShowRoleMenu(!showRoleMenu)}
-            className="flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-blue-900/60 hover:bg-blue-800 border border-blue-700/50 text-blue-200 text-xs transition"
-            title="Fast Role Switcher for Evaluation"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>Switch Role / Demo Profile</span>
-            <ChevronDown className="w-3 h-3" />
-          </button>
-
-          {showRoleMenu && (
-            <div className="absolute right-0 mt-1 w-56 bg-slate-800 border border-slate-700 rounded shadow-xl py-1 z-50 text-xs">
-              <div className="px-3 py-1 font-semibold text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
-                1-Click Role Testing
-              </div>
-              <button
-                onClick={() => { fastSwitchRole('ADMIN'); setShowRoleMenu(false); navigate('/admin'); }}
-                className="w-full text-left px-3 py-2 hover:bg-slate-700 text-slate-200 flex items-center justify-between"
-              >
-                <span>Dr. Mohapatra (Admin)</span>
-                <span className="bg-purple-900/80 text-purple-200 px-1.5 py-0.5 rounded text-[10px]">ADMIN</span>
-              </button>
-              <button
-                onClick={() => { fastSwitchRole('TRAINER'); setShowRoleMenu(false); navigate('/trainer'); }}
-                className="w-full text-left px-3 py-2 hover:bg-slate-700 text-slate-200 flex items-center justify-between"
-              >
-                <span>Dr. Jenamani (Trainer)</span>
-                <span className="bg-emerald-900/80 text-emerald-200 px-1.5 py-0.5 rounded text-[10px]">TRAINER</span>
-              </button>
-              <button
-                onClick={() => { fastSwitchRole('TRAINEE'); setShowRoleMenu(false); navigate('/courses'); }}
-                className="w-full text-left px-3 py-2 hover:bg-slate-700 text-slate-200 flex items-center justify-between"
-              >
-                <span>Rajesh Sharma (Trainee)</span>
-                <span className="bg-blue-900/80 text-blue-200 px-1.5 py-0.5 rounded text-[10px]">TRAINEE</span>
-              </button>
-              <button
-                onClick={() => { fastSwitchRole('PENDING'); setShowRoleMenu(false); }}
-                className="w-full text-left px-3 py-2 hover:bg-slate-700 text-slate-200 flex items-center justify-between"
-              >
-                <span>Amit Kumar (Pending)</span>
-                <span className="bg-amber-900/80 text-amber-200 px-1.5 py-0.5 rounded text-[10px]">PENDING</span>
-              </button>
-            </div>
-          )}
+        <div className="flex items-center gap-3 text-[11px] text-slate-400">
+          <span>Official IMD Capacity Building Portal</span>
         </div>
       </div>
 

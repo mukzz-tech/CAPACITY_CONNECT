@@ -221,7 +221,7 @@ export const CourseBrowsePage: React.FC = () => {
                   to={`/courses/${course.id}`}
                   className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition"
                 >
-                  <span>View Syllabus & Enroll</span>
+                  <span>{user?.role === 'TRAINER' ? 'View Curriculum & Lessons' : user?.role === 'ADMIN' ? 'Inspect Syllabus' : 'View Syllabus & Enroll'}</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
