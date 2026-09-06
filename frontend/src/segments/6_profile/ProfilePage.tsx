@@ -23,6 +23,7 @@ import { Certificate } from '../../types';
 import {
   getCameraStream,
   releaseCameraStream,
+  stopAllCameraTracks,
   attachStreamToVideo,
   getVideoDevices,
   setSimulatedGaze,
@@ -128,7 +129,7 @@ export const ProfilePage: React.FC = () => {
     const mode = overrideMode !== undefined ? overrideMode : selectedCameraMode;
 
     if (testCameraActive && overrideMode === undefined) {
-      releaseCameraStream();
+      stopAllCameraTracks();
       testStreamRef.current = null;
       if (testVideoRef.current) {
         testVideoRef.current.srcObject = null;
@@ -138,8 +139,9 @@ export const ProfilePage: React.FC = () => {
       return;
     }
 
-    if (testStreamRef.current) {
-      releaseCameraStream();
+    if (testStreamRef.current || overrideMode !== undefined) {
+      stopAllCameraTracks();
+      testStreamRef.current = null;
     }
 
     setCameraStatusMsg('Initializing video stream...');
@@ -151,8 +153,7 @@ export const ProfilePage: React.FC = () => {
       if (mode === 'simulated') {
         setCameraStatusMsg('Live OpenCV Simulation Active! Test face centered (100% Integrity).');
       } else {
-        const devs = await getVideoDevices();
-        setAvailableDevices(devs);
+        getVideoDevices().then(setAvailableDevices).catch(console.warn);
         setCameraStatusMsg('🟢 Camera hardware active • OpenCV frame analysis running...');
       }
 
@@ -208,7 +209,7 @@ export const ProfilePage: React.FC = () => {
   useEffect(() => {
     return () => {
       if (testCameraActive) {
-        releaseCameraStream();
+        stopAllCameraTracks();
       }
       stopMicTest();
     };

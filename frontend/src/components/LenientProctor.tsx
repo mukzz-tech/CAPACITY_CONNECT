@@ -16,6 +16,7 @@ import {
 import {
   getCameraStream,
   releaseCameraStream,
+  stopAllCameraTracks,
   attachStreamToVideo,
   getVideoDevices,
   getSimulatedFaceStream,
@@ -99,7 +100,7 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
 
   const handleDeviceChange = (mode: string) => {
     setSelectedCameraMode(mode);
-    releaseCameraStream();
+    stopAllCameraTracks();
     startCamera(mode);
   };
 
@@ -107,7 +108,7 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
     startCamera();
 
     return () => {
-      releaseCameraStream();
+      stopAllCameraTracks();
     };
   }, []);
 

@@ -3,6 +3,7 @@ import { ShieldAlert, ShieldCheck, Eye, Video, VideoOff, RefreshCw, Sparkles, Al
 import {
   getCameraStream,
   releaseCameraStream,
+  stopAllCameraTracks,
   attachStreamToVideo,
   getVideoDevices,
   setSimulatedGaze,
@@ -87,7 +88,7 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
 
   // Stop camera stream cleanly
   const stopTracks = () => {
-    releaseCameraStream();
+    stopAllCameraTracks();
     streamRef.current = null;
     if (videoRef.current) {
       videoRef.current.srcObject = null;
@@ -103,6 +104,11 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
     setIsRequesting(true);
     setErrorMessage(null);
     setStatusMessage('Connecting video stream...');
+
+    if (overrideMode !== undefined && streamRef.current) {
+      stopAllCameraTracks();
+      streamRef.current = null;
+    }
 
     try {
       const stream = await getCameraStream(mode === 'auto' ? undefined : mode);
@@ -159,7 +165,7 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
     startCamera();
 
     return () => {
-      releaseCameraStream();
+      stopAllCameraTracks();
     };
   }, []);
 
