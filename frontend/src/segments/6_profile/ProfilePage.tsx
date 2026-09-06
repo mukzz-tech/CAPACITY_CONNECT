@@ -167,6 +167,10 @@ export const ProfilePage: React.FC = () => {
   };
 
   useEffect(() => {
+    getVideoDevices().then(setAvailableDevices).catch(console.warn);
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (testCameraActive) {
         releaseCameraStream();
@@ -546,15 +550,24 @@ export const ProfilePage: React.FC = () => {
                     handleTestWebcam(e.target.value);
                   }
                 }}
-                className="w-full text-[11px] rounded-lg border border-slate-300 p-1 bg-white font-medium text-slate-800"
+                className="w-full text-[11px] rounded-lg border border-slate-300 p-1.5 bg-white font-medium text-slate-800"
               >
-                <option value="auto">Auto-Detect Webcam (Bypasses Phone Link)</option>
-                <option value="simulated">🧑‍💻 OpenCV Live Simulated Face Feed (No Camera Needed)</option>
-                {availableDevices.map((d, i) => (
-                  <option key={d.deviceId || i} value={d.deviceId}>
-                    {d.label || `Camera ${i + 1}`}
-                  </option>
-                ))}
+                <option value="auto">🌟 Auto-Detect (Prioritizes Real Laptop Webcam)</option>
+                <option value="simulated">🧑‍💻 OpenCV Live Simulated Face Feed (Proctoring Test Mode)</option>
+                {availableDevices.map((d, i) => {
+                  const lbl = d.label || '';
+                  const isPhoneLink =
+                    lbl.toLowerCase().includes('phone') ||
+                    lbl.toLowerCase().includes('link to windows') ||
+                    lbl.toLowerCase().includes('virtual');
+                  return (
+                    <option key={d.deviceId || i} value={d.deviceId}>
+                      {isPhoneLink
+                        ? `📱 ${lbl} (Phone Link - Requires paired phone)`
+                        : `📷 ${lbl || `Physical Webcam ${i + 1}`}`}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 

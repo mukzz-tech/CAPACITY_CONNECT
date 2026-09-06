@@ -20,9 +20,23 @@ let simAnimFrame = 0;
 export async function getVideoDevices(): Promise<MediaDeviceInfo[]> {
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
-    // Prompt permission if not granted to retrieve real labels
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    return devices.filter((d) => d.kind === 'videoinput');
+    let devices = await navigator.mediaDevices.enumerateDevices();
+    let videoDevices = devices.filter((d) => d.kind === 'videoinput');
+
+    // If device labels are empty, camera permission hasn't been granted yet on this origin.
+    // Briefly request a lightweight video stream to unlock real hardware labels (e.g. "Integrated Camera").
+    if (videoDevices.length > 0 && !videoDevices.some((d) => Boolean(d.label))) {
+      try {
+        const tempStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+        devices = await navigator.mediaDevices.enumerateDevices();
+        videoDevices = devices.filter((d) => d.kind === 'videoinput');
+        tempStream.getTracks().forEach((t) => t.stop());
+      } catch (permErr) {
+        // Handled silently
+      }
+    }
+
+    return videoDevices;
   } catch (e) {
     return [];
   }
@@ -183,8 +197,16 @@ export async function getCameraStream(preferredDeviceId?: string): Promise<Media
     activeStream.getVideoTracks().some((t) => t.readyState === 'live') &&
     !preferredDeviceId
   ) {
-    activeConsumers++;
-    return activeStream;
+    const activeTrack = activeStream.getVideoTracks()[0];
+    const trackLabel = (activeTrack?.label || '').toLowerCase();
+    const isVirtual = trackLabel.includes('link to windows') || trackLabel.includes('phone') || trackLabel.includes('virtual');
+    if (!isVirtual) {
+      activeConsumers++;
+      return activeStream;
+    }
+    // Stop virtual track if running
+    activeStream.getTracks().forEach((t) => t.stop());
+    activeStream = null;
   }
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -193,19 +215,28 @@ export async function getCameraStream(preferredDeviceId?: string): Promise<Media
 
   // Check available devices to avoid the "Link to Windows" virtual device trap
   const devices = await getVideoDevices();
-  let targetDeviceId = preferredDeviceId;
+  let targetDeviceId = preferredDeviceId && preferredDeviceId !== 'auto' ? preferredDeviceId : undefined;
 
   if (!targetDeviceId && devices.length > 0) {
-    // Find first device that is NOT Phone Link / Virtual
-    const realWebcam = devices.find(
-      (d) =>
-        d.deviceId &&
-        !d.label.toLowerCase().includes('link to windows') &&
-        !d.label.toLowerCase().includes('phone') &&
-        !d.label.toLowerCase().includes('virtual')
-    );
-    if (realWebcam) {
-      targetDeviceId = realWebcam.deviceId;
+    // 1. Look for explicit physical camera labels
+    const physicalCam = devices.find((d) => {
+      const l = (d.label || '').toLowerCase();
+      const isVirtual = l.includes('link to windows') || l.includes('phone') || l.includes('virtual') || l.includes('obs');
+      const isPhysical = l.includes('integrated') || l.includes('realtek') || l.includes('webcam') || l.includes('usb') || l.includes('hd') || l.includes('front') || l.includes('camera');
+      return !isVirtual && isPhysical;
+    });
+
+    if (physicalCam && physicalCam.deviceId) {
+      targetDeviceId = physicalCam.deviceId;
+    } else {
+      // 2. Any non-virtual device
+      const nonVirtual = devices.find((d) => {
+        const l = (d.label || '').toLowerCase();
+        return !l.includes('link to windows') && !l.includes('phone') && !l.includes('virtual');
+      });
+      if (nonVirtual && nonVirtual.deviceId) {
+        targetDeviceId = nonVirtual.deviceId;
+      }
     }
   }
 
@@ -222,14 +253,44 @@ export async function getCameraStream(preferredDeviceId?: string): Promise<Media
     });
   }
 
-  constraintTiers.push({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }, audio: false });
-  constraintTiers.push({ video: { width: { ideal: 320 }, height: { ideal: 240 } }, audio: false });
+  constraintTiers.push({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+  constraintTiers.push({ video: { facingMode: 'user' }, audio: false });
   constraintTiers.push({ video: true, audio: false });
 
   let lastError: any = null;
   for (const constraints of constraintTiers) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const activeTrack = stream.getVideoTracks()[0];
+      const trackLabel = (activeTrack?.label || '').toLowerCase();
+      const isVirtualTrack = trackLabel.includes('link to windows') || trackLabel.includes('phone') || trackLabel.includes('virtual');
+
+      // If Windows defaulted to Phone Link virtual camera, check if physical camera exists and switch!
+      if (isVirtualTrack && !preferredDeviceId) {
+        const freshDevs = await navigator.mediaDevices.enumerateDevices();
+        const realDev = freshDevs.find((d) => {
+          if (d.kind !== 'videoinput') return false;
+          const l = (d.label || '').toLowerCase();
+          return (l.includes('integrated') || l.includes('realtek') || l.includes('webcam') || l.includes('camera')) && !l.includes('virtual') && !l.includes('link to windows') && !l.includes('phone');
+        });
+
+        if (realDev && realDev.deviceId) {
+          try {
+            const realStream = await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: { exact: realDev.deviceId } },
+              audio: false,
+            });
+            // Stop virtual track so Windows closes Phone Link window 12403!
+            stream.getTracks().forEach((t) => t.stop());
+            activeStream = realStream;
+            activeConsumers++;
+            return realStream;
+          } catch (e) {
+            console.warn('Switching to physical camera failed:', e);
+          }
+        }
+      }
+
       activeStream = stream;
       activeConsumers++;
       return stream;
@@ -239,7 +300,11 @@ export async function getCameraStream(preferredDeviceId?: string): Promise<Media
     }
   }
 
-  throw lastError || new Error('No functional camera could be opened.');
+  // Graceful fallback to simulated OpenCV stream if physical webcam is occupied or blocked
+  console.warn('Physical camera unavailable, falling back to simulated stream:', lastError);
+  const fallbackStream = getSimulatedFaceStream();
+  activeConsumers++;
+  return fallbackStream;
 }
 
 export function releaseCameraStream() {

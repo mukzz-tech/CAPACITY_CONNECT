@@ -112,21 +112,22 @@ export const Navbar: React.FC = () => {
               onClick={toggleVoice}
               className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
                 isVoiceActive
-                  ? 'bg-red-950/80 border-red-600 text-red-300 shadow-sm shadow-red-900'
-                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
+                  ? 'bg-red-950/80 border-red-600 text-red-300 shadow-sm shadow-red-900 ring-2 ring-red-500/40'
+                  : 'bg-slate-800 hover:bg-slate-700 border-blue-500/50 text-blue-200 hover:text-white shadow-sm'
               }`}
-              title="Toggle Hands-Free Voice Control (Speak: 'go to courses', 'open my certificates', 'next question')"
+              title="Click to Turn Voice Navigation ON/OFF (Speak: courses, home, profile, chatbot, read aloud)"
             >
               {isVoiceActive ? (
                 <>
                   <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
                   <Mic className="w-3.5 h-3.5 text-red-400" />
-                  <span className="font-semibold">Voice Active</span>
+                  <span className="font-semibold text-white">Voice Active</span>
                 </>
               ) : (
                 <>
-                  <MicOff className="w-3.5 h-3.5 text-slate-400" />
+                  <Mic className="w-3.5 h-3.5 text-blue-400" />
                   <span>Voice Control</span>
+                  <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.2 rounded font-mono">OFF</span>
                 </>
               )}
             </button>
@@ -177,7 +178,7 @@ export const Navbar: React.FC = () => {
 
         {/* Live Voice Command Bar (Shown whenever Voice Control is ON) */}
         {isVoiceActive && (
-          <div className="py-1.5 px-4 bg-gradient-to-r from-red-950/80 via-slate-900 to-red-950/80 border-t border-red-800/60 flex flex-wrap items-center justify-between text-xs text-red-200 animate-in fade-in duration-200">
+          <div className="py-1.5 px-4 bg-gradient-to-r from-red-950/90 via-slate-900 to-red-950/90 border-t border-red-800/60 flex flex-wrap items-center justify-between text-xs text-red-200 animate-in fade-in duration-200 gap-2">
             <div className="flex items-center gap-2.5">
               <div className="relative flex items-center justify-center">
                 <span className="w-3 h-3 rounded-full bg-red-500 animate-ping absolute" />
@@ -188,17 +189,48 @@ export const Navbar: React.FC = () => {
                 {lastRecognizedPhrase ? (
                   <>Heard: <strong className="text-amber-300 font-mono text-xs">"{lastRecognizedPhrase}"</strong></>
                 ) : (
-                  <span className="text-red-200 animate-pulse">Listening for voice command...</span>
+                  <span className="text-red-200 animate-pulse">Listening... Speak now to navigate</span>
                 )}
               </span>
             </div>
 
-            <div className="flex items-center gap-2 text-[11px] text-slate-300">
-              <span className="text-slate-400">Try saying:</span>
-              <span className="px-1.5 py-0.5 rounded bg-slate-800/80 font-mono text-amber-300">"courses"</span>
-              <span className="px-1.5 py-0.5 rounded bg-slate-800/80 font-mono text-amber-300">"profile"</span>
-              <span className="px-1.5 py-0.5 rounded bg-slate-800/80 font-mono text-amber-300">"chatbot"</span>
-              <span className="px-1.5 py-0.5 rounded bg-slate-800/80 font-mono text-amber-300">"read aloud"</span>
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-300">
+              <span className="text-slate-400 mr-1">Say or click:</span>
+              <button
+                type="button"
+                onClick={() => navigate('/courses')}
+                className="px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 font-mono text-amber-300 border border-slate-700 hover:border-amber-400 transition"
+              >
+                "courses"
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/profile')}
+                className="px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 font-mono text-amber-300 border border-slate-700 hover:border-amber-400 transition"
+              >
+                "profile"
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/chatbot')}
+                className="px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 font-mono text-amber-300 border border-slate-700 hover:border-amber-400 transition"
+              >
+                "chatbot"
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                className="px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 font-mono text-amber-300 border border-slate-700 hover:border-amber-400 transition"
+              >
+                "home"
+              </button>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('imd-voice-read-aloud'))}
+                className="px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 font-mono text-amber-300 border border-slate-700 hover:border-amber-400 transition"
+              >
+                "read aloud"
+              </button>
             </div>
           </div>
         )}

@@ -14,7 +14,13 @@ interface VoiceContextType {
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 
 export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false);
+  const [isVoiceActive, setIsVoiceActive] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('imd_voice_active') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [isListening, setIsListening] = useState<boolean>(false);
   const [lastRecognizedPhrase, setLastRecognizedPhrase] = useState<string>('');
   const [supported, setSupported] = useState<boolean>(true);
@@ -71,13 +77,19 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  // Executes matched actions based on spoken keywords
-  const processVoiceCommand = (rawPhrase: string) => {
-    const phrase = rawPhrase.trim().toLowerCase();
-    setLastRecognizedPhrase(phrase);
-    console.log('[Voice Command Heard]:', phrase);
+  // Executes matched actions based on spoken keywords immediately
+  const lastCmdTimeRef = useRef<number>(0);
 
-    playTone(620, 0.1);
+  const processVoiceCommand = (rawPhrase: string): boolean => {
+    const phrase = rawPhrase.trim().toLowerCase();
+    if (!phrase) return false;
+
+    const now = Date.now();
+    if (now - lastCmdTimeRef.current < 1200) {
+      return false; // Prevent duplicate triggers within 1.2s
+    }
+
+    console.log('[Voice Command Processed]:', phrase);
 
     // 1. Courses Navigation
     if (
@@ -85,9 +97,16 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       phrase.includes('courses') ||
       phrase.includes('syllabus') ||
       phrase.includes('catalogue') ||
+      phrase.includes('catalog') ||
+      phrase.includes('training') ||
+      phrase.includes('module') ||
+      phrase.includes('learn') ||
+      phrase.includes('class') ||
       phrase.includes('पाठ्यक्रम') ||
       phrase.includes('कोर्स')
     ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
       speakText('Navigating to course catalogue');
       navigate('/courses');
       return true;
@@ -99,21 +118,30 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       phrase.includes('certificates') ||
       phrase.includes('profile') ||
       phrase.includes('my profile') ||
+      phrase.includes('account') ||
+      phrase.includes('marks') ||
+      phrase.includes('score') ||
       phrase.includes('प्रमाणपत्र') ||
       phrase.includes('प्रोफ़ाइल')
     ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
       speakText('Opening your profile and certificates');
       navigate('/profile');
       return true;
     }
 
-    // 3. Homepage
+    // 3. Homepage / Dashboard
     if (
       phrase.includes('home') ||
       phrase.includes('dashboard') ||
       phrase.includes('main page') ||
-      phrase.includes('होम')
+      phrase.includes('start') ||
+      phrase.includes('होम') ||
+      phrase.includes('डैशबोर्ड')
     ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
       speakText('Navigating to homepage');
       navigate('/');
       return true;
@@ -126,56 +154,136 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       phrase.includes('assistant') ||
       phrase.includes('doubt') ||
       phrase.includes('ai') ||
-      phrase.includes('सहायक')
+      phrase.includes('bot') ||
+      phrase.includes('सहायक') ||
+      phrase.includes('संदेह')
     ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
       speakText('Opening IMD meteorological assistant');
       navigate('/chatbot');
       return true;
     }
 
-    // 5. Read Aloud / TTS trigger
+    // 5. Login
+    if (
+      phrase.includes('login') ||
+      phrase.includes('log in') ||
+      phrase.includes('sign in') ||
+      phrase.includes('signin') ||
+      phrase.includes('लॉगिन')
+    ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
+      speakText('Opening login page');
+      navigate('/login');
+      return true;
+    }
+
+    // 6. Signup
+    if (
+      phrase.includes('signup') ||
+      phrase.includes('sign up') ||
+      phrase.includes('register') ||
+      phrase.includes('पंजीकरण')
+    ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
+      speakText('Opening registration page');
+      navigate('/signup');
+      return true;
+    }
+
+    // 7. Trainer Studio
+    if (
+      phrase.includes('trainer') ||
+      phrase.includes('trainer studio') ||
+      phrase.includes('instructor') ||
+      phrase.includes('ट्रेनर')
+    ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
+      speakText('Opening Trainer Studio');
+      navigate('/trainer');
+      return true;
+    }
+
+    // 8. Admin Console
+    if (
+      phrase.includes('admin') ||
+      phrase.includes('admin console') ||
+      phrase.includes('administrator') ||
+      phrase.includes('व्यवस्थापक')
+    ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
+      speakText('Opening Admin Console');
+      navigate('/admin');
+      return true;
+    }
+
+    // 9. Read Aloud / TTS trigger
     if (
       phrase.includes('read aloud') ||
       phrase.includes('read this') ||
       phrase.includes('read') ||
       phrase.includes('listen') ||
+      phrase.includes('speak') ||
       phrase.includes('सुनो') ||
       phrase.includes('पढ़ो')
     ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
       speakText('Reading study notes aloud');
       window.dispatchEvent(new CustomEvent('imd-voice-read-aloud'));
       return true;
     }
 
-    // 6. Camera Test Trigger
+    // 10. Camera Test Trigger
     if (
       phrase.includes('camera') ||
       phrase.includes('webcam') ||
       phrase.includes('test camera') ||
       phrase.includes('कैमरा')
     ) {
-      speakText('Triggering camera test');
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
+      speakText('Opening camera diagnostics');
+      navigate('/profile');
       window.dispatchEvent(new CustomEvent('imd-voice-test-camera'));
       return true;
     }
 
-    // 7. Next Question in Assessment
+    // 11. Next Question in Assessment
     if (
       phrase.includes('next question') ||
       phrase.includes('next') ||
       phrase.includes('अगला')
     ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
       speakText('Moving to next question');
       window.dispatchEvent(new CustomEvent('imd-voice-next-question'));
       return true;
     }
 
-    // 8. General voice input broadcast (for assessments / forms)
+    // 12. Option selection in MCQ
+    const optionMatch = phrase.match(/option\s*([a-d])|select\s*([a-d])|विकल्प\s*([a-d])/i);
+    if (optionMatch) {
+      lastCmdTimeRef.current = now;
+      const opt = (optionMatch[1] || optionMatch[2] || optionMatch[3]).toUpperCase();
+      playTone(620, 0.1);
+      speakText(`Selecting option ${opt}`);
+      window.dispatchEvent(new CustomEvent('imd-voice-option-select', { detail: opt }));
+      return true;
+    }
+
+    // 13. General voice input broadcast (for assessments / forms)
     window.dispatchEvent(new CustomEvent('imd-voice-general', { detail: phrase }));
     return false;
   };
 
-  // Robust session spawner: instantiates a fresh SpeechRecognition per recognition cycle
+  // Robust session spawner: instantiates fresh SpeechRecognition per recognition cycle
   const startNewListeningSession = () => {
     if (!isVoiceActiveRef.current) return;
 
@@ -189,21 +297,35 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     try {
       const recognition = new SpeechRecognition();
-      recognition.continuous = false; // Fast, reliable single-phrase capture
-      recognition.interimResults = true;
-      recognition.lang = 'en-IN'; // Optimized for Indian English and terminology
+      recognition.continuous = false; // Capture phrase quickly without state locking
+      recognition.interimResults = true; // Stream instant transcripts
+      recognition.lang = 'en-IN'; // Indian English / accent optimized
+
+      let sessionMatched = false;
+      let bufferTranscript = '';
 
       recognition.onstart = () => {
         setIsListening(true);
       };
 
       recognition.onresult = (event: any) => {
-        const lastResult = event.results[event.results.length - 1];
-        const transcript = lastResult[0].transcript.trim();
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript + ' ';
+        }
+        transcript = transcript.trim();
+        bufferTranscript = transcript;
         setLastRecognizedPhrase(transcript);
 
-        if (lastResult.isFinal) {
-          processVoiceCommand(transcript);
+        // Instant match check: navigate immediately upon hearing keyword
+        if (!sessionMatched && transcript.length > 0) {
+          const matched = processVoiceCommand(transcript);
+          if (matched) {
+            sessionMatched = true;
+            try {
+              recognition.stop();
+            } catch (e) {}
+          }
         }
       };
 
@@ -214,6 +336,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (event.error === 'not-allowed') {
           setIsVoiceActive(false);
           isVoiceActiveRef.current = false;
+          localStorage.setItem('imd_voice_active', 'false');
           speakText('Microphone permission not granted');
         }
       };
@@ -221,6 +344,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       recognition.onend = () => {
         setIsListening(false);
         activeRecognitionRef.current = null;
+
+        // Fallback check on session end if not matched during interim
+        if (!sessionMatched && bufferTranscript) {
+          processVoiceCommand(bufferTranscript);
+        }
 
         // Auto-restart with fresh instance if voice control remains active
         if (isVoiceActiveRef.current) {
@@ -268,6 +396,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (isVoiceActive) {
       setIsVoiceActive(false);
       isVoiceActiveRef.current = false;
+      try {
+        localStorage.setItem('imd_voice_active', 'false');
+      } catch {}
       stopActiveSession();
       playTone(320, 0.15);
       speakText('Voice navigation turned off');
@@ -285,6 +416,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       setIsVoiceActive(true);
       isVoiceActiveRef.current = true;
+      try {
+        localStorage.setItem('imd_voice_active', 'true');
+      } catch {}
       playTone(550, 0.15);
       speakText('Voice navigation active. Say: courses, certificates, home, chatbot, or read aloud.');
       startNewListeningSession();
@@ -292,6 +426,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   useEffect(() => {
+    if (isVoiceActive) {
+      isVoiceActiveRef.current = true;
+      startNewListeningSession();
+    }
     return () => {
       stopActiveSession();
     };
