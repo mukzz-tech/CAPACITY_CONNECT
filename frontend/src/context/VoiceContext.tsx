@@ -1,60 +1,98 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-interface VoiceContextType {
+export interface VoiceContextType {
   isVoiceActive: boolean;
   toggleVoice: () => Promise<void>;
   lastRecognizedPhrase: string;
   isListening: boolean;
   supported: boolean;
+  audioLevel: number;
+  lastActionStatus: string;
   speakText: (text: string, lang?: string, onComplete?: () => void) => void;
   playTone: (freq?: number, duration?: number) => void;
   pauseListening: () => void;
   resumeListening: () => void;
   captureVoiceInput: (promptMessage?: string) => Promise<string>;
+  simulateVoiceInput: (phrase: string) => boolean;
 }
 
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 
-// Auto-fill active input or textarea on the page with spoken words
+// Auto-fill active or first visible editable input/textarea on the screen
 export const fillActiveInput = (text: string): boolean => {
   try {
-    const el = document.activeElement;
-    if (!el) return false;
+    let el = document.activeElement as HTMLElement | null;
 
-    if (el instanceof HTMLInputElement && ['text', 'search', 'email', 'url', ''].includes(el.type)) {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        'value'
-      )?.set;
-      if (nativeInputValueSetter) {
-        nativeInputValueSetter.call(el, text);
-      } else {
-        el.value = text;
+    const isEditable = (node: Element | null): node is HTMLInputElement | HTMLTextAreaElement => {
+      if (!node) return false;
+      if (node instanceof HTMLInputElement) {
+        return (
+          ['text', 'search', 'email', 'url', 'password', 'tel', 'number', ''].includes(node.type) &&
+          !node.disabled &&
+          !node.readOnly
+        );
       }
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
+      if (node instanceof HTMLTextAreaElement) {
+        return !node.disabled && !node.readOnly;
+      }
+      return false;
+    };
+
+    // If activeElement is body or not an editable field, auto-detect the best visible input on screen
+    if (!isEditable(el)) {
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])'
+        )
+      );
+      el =
+        candidates.find((input) => {
+          const rect = input.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+        }) || null;
     }
 
-    if (el instanceof HTMLTextAreaElement) {
-      const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        'value'
-      )?.set;
-      if (nativeTextAreaValueSetter) {
-        nativeTextAreaValueSetter.call(el, text);
-      } else {
-        el.value = text;
-      }
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
+    if (!isEditable(el)) return false;
+
+    // Focus and highlight target input
+    try {
+      el.focus();
+    } catch {}
+
+    const prototype =
+      el instanceof HTMLInputElement
+        ? window.HTMLInputElement.prototype
+        : window.HTMLTextAreaElement.prototype;
+    const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+
+    if (nativeSetter) {
+      nativeSetter.call(el, text);
+    } else {
+      el.value = text;
     }
+
+    // Trigger synthetic React events
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Visual flash confirmation
+    const prevOutline = el.style.outline;
+    const prevTransition = el.style.transition;
+    el.style.transition = 'outline 0.15s ease-in-out';
+    el.style.outline = '3px solid #38bdf8';
+    setTimeout(() => {
+      if (el) {
+        el.style.outline = prevOutline;
+        el.style.transition = prevTransition;
+      }
+    }, 600);
+
+    return true;
   } catch (e) {
     console.warn('Auto-fill input error:', e);
+    return false;
   }
-  return false;
 };
 
 export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -67,23 +105,31 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
   const [isListening, setIsListening] = useState<boolean>(false);
   const [lastRecognizedPhrase, setLastRecognizedPhrase] = useState<string>('');
+  const [lastActionStatus, setLastActionStatus] = useState<string>('');
+  const [audioLevel, setAudioLevel] = useState<number>(0);
   const [supported, setSupported] = useState<boolean>(true);
 
   const activeRecognitionRef = useRef<any>(null);
+  const isSessionStartingRef = useRef<boolean>(false);
   const isVoiceActiveRef = useRef<boolean>(false);
   const isPausedRef = useRef<boolean>(false);
-  const isSpeakingRef = useRef<boolean>(false);
   const restartTimeoutRef = useRef<any>(null);
-  const speakingSafetyTimeoutRef = useRef<any>(null);
   const lastCmdTimeRef = useRef<number>(0);
+
+  // Audio Stream & VU Meter refs
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
   const navigate = useNavigate();
 
   useEffect(() => {
     isVoiceActiveRef.current = isVoiceActive;
   }, [isVoiceActive]);
 
-  // Audio tone feedback using Web Audio API ("make noise" - instant & 100% reliable)
-  const playTone = (freq = 480, duration = 0.15) => {
+  // Audio tone feedback using Web Audio API (Instant & 100% reliable)
+  const playTone = (freq = 520, duration = 0.12) => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
@@ -106,7 +152,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  // Vocal spoken confirmation with non-blocking safety timer & self-echo suppression
+  // Vocal spoken confirmation with non-blocking safety timer
   const speakText = (text: string, lang = 'en-US', onComplete?: () => void) => {
     try {
       if (!('speechSynthesis' in window)) {
@@ -114,358 +160,404 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return;
       }
 
-      if (speakingSafetyTimeoutRef.current) {
-        clearTimeout(speakingSafetyTimeoutRef.current);
-      }
+      window.speechSynthesis.resume();
+      window.speechSynthesis.cancel();
 
-      isSpeakingRef.current = true;
+      setTimeout(() => {
+        try {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = lang;
+          utterance.rate = 1.05;
 
-      // Calculate approximate speech duration (words * 320ms, min 1s, max 4s)
-      const wordCount = text.split(/\s+/).length;
-      const safeDuration = Math.max(1000, Math.min(4000, wordCount * 320));
+          const voices = window.speechSynthesis.getVoices();
+          const matched = voices.find((v) =>
+            lang.startsWith('hi')
+              ? v.lang.toLowerCase().includes('hi') || v.name.toLowerCase().includes('hindi')
+              : v.lang.toLowerCase().includes('en')
+          );
+          if (matched) utterance.voice = matched;
 
-      let hasCompleted = false;
-      const safeComplete = () => {
-        if (hasCompleted) return;
-        hasCompleted = true;
-        isSpeakingRef.current = false;
-        onComplete?.();
-      };
+          utterance.onend = () => onComplete?.();
+          utterance.onerror = () => onComplete?.();
 
-      // Guaranteed safety timeout: NEVER allow isSpeaking to stay stuck
-      speakingSafetyTimeoutRef.current = setTimeout(safeComplete, safeDuration);
-
-      // In Chrome: unpause synthesizer and add small tick before speaking
-      try {
-        window.speechSynthesis.resume();
-        window.speechSynthesis.cancel();
-
-        setTimeout(() => {
-          try {
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = lang;
-            utterance.rate = 1.05;
-
-            const voices = window.speechSynthesis.getVoices();
-            const matched = voices.find((v) =>
-              lang.startsWith('hi')
-                ? v.lang.toLowerCase().includes('hi') || v.name.toLowerCase().includes('hindi')
-                : v.lang.toLowerCase().includes('en')
-            );
-            if (matched) utterance.voice = matched;
-
-            utterance.onend = () => {
-              setTimeout(safeComplete, 200);
-            };
-            utterance.onerror = () => {
-              safeComplete();
-            };
-
-            window.speechSynthesis.speak(utterance);
-          } catch (e) {
-            safeComplete();
-          }
-        }, 40);
-      } catch (e) {
-        safeComplete();
-      }
-    } catch (e) {
-      console.warn('Speech synthesis error', e);
-      isSpeakingRef.current = false;
+          window.speechSynthesis.speak(utterance);
+        } catch {
+          onComplete?.();
+        }
+      }, 30);
+    } catch {
       onComplete?.();
     }
   };
 
-  // Executes matched actions based on spoken keywords immediately
-  const processVoiceCommand = (rawPhrase: string): boolean => {
-    // Ignore speech if system is speaking its own voice (Prevents echo loops)
-    if (isSpeakingRef.current) {
-      return false;
-    }
+  // Starts real-time Web Audio VU Meter to detect physical microphone volume
+  const startMicAudioMeter = async () => {
+    try {
+      if (micStreamRef.current && audioContextRef.current) return;
 
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      micStreamRef.current = stream;
+
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+
+      const ctx = new AudioCtx();
+      audioContextRef.current = ctx;
+
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      analyserRef.current = analyser;
+      source.connect(analyser);
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const updateLevel = () => {
+        if (!analyserRef.current || !isVoiceActiveRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / bufferLength;
+        const normalized = Math.min(100, Math.round((avg / 90) * 100));
+        setAudioLevel(normalized);
+
+        animFrameRef.current = requestAnimationFrame(updateLevel);
+      };
+
+      updateLevel();
+    } catch (e) {
+      console.warn('Audio meter init error (mic may already be shared):', e);
+    }
+  };
+
+  const stopMicAudioMeter = () => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch {}
+      audioContextRef.current = null;
+    }
+    setAudioLevel(0);
+  };
+
+  // Core Command & Box-Filling Router
+  const processVoiceCommand = (rawPhrase: string): boolean => {
     const phrase = rawPhrase.trim().toLowerCase();
     if (!phrase) return false;
 
     const now = Date.now();
-    if (now - lastCmdTimeRef.current < 900) {
-      return false; // Debounce rapid multi-token matches
+    if (now - lastCmdTimeRef.current < 600) {
+      return false; // Debounce
     }
 
-    console.log('[Voice Recognized]:', phrase);
+    console.log('[Voice Command Engine]:', phrase);
+    setLastRecognizedPhrase(rawPhrase.trim());
 
     // 1. Courses Navigation
     if (
-      phrase.includes('course') ||
-      phrase.includes('courses') ||
+      phrase === 'courses' ||
+      phrase === 'course' ||
+      phrase.startsWith('go to course') ||
+      phrase.startsWith('open course') ||
+      phrase.startsWith('show course') ||
       phrase.includes('syllabus') ||
       phrase.includes('catalogue') ||
-      phrase.includes('catalog') ||
-      phrase.includes('curriculum') ||
-      phrase.includes('training') ||
-      phrase.includes('module') ||
-      phrase.includes('modules') ||
-      phrase.includes('learn') ||
-      phrase.includes('learning') ||
-      phrase.includes('class') ||
-      phrase.includes('classes') ||
       phrase.includes('पाठ्यक्रम') ||
-      phrase.includes('कोर्स') ||
-      phrase.includes('प्रशिक्षण')
+      phrase.includes('कोर्स')
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Navigating to course catalogue');
+      setLastActionStatus('Navigating to Courses...');
       navigate('/courses');
       return true;
     }
 
     // 2. Profile & Certificates Navigation
     if (
-      phrase.includes('certificate') ||
-      phrase.includes('certificates') ||
-      phrase.includes('profile') ||
-      phrase.includes('my profile') ||
+      phrase === 'profile' ||
+      phrase === 'my profile' ||
+      phrase === 'certificates' ||
+      phrase === 'certificate' ||
+      phrase.startsWith('open profile') ||
+      phrase.startsWith('go to profile') ||
       phrase.includes('account') ||
-      phrase.includes('marks') ||
-      phrase.includes('score') ||
       phrase.includes('scores') ||
       phrase.includes('प्रमाणपत्र') ||
-      phrase.includes('प्रोफ़ाइल') ||
-      phrase.includes('सर्टिफिकेट')
+      phrase.includes('प्रोफ़ाइल')
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Opening profile and certificates');
+      setLastActionStatus('Opening Profile & Certificates...');
       navigate('/profile');
       return true;
     }
 
     // 3. Homepage / Dashboard
     if (
-      phrase.includes('home') ||
-      phrase.includes('homepage') ||
-      phrase.includes('dashboard') ||
+      phrase === 'home' ||
+      phrase === 'homepage' ||
+      phrase === 'dashboard' ||
+      phrase.startsWith('go home') ||
+      phrase.startsWith('go to home') ||
       phrase.includes('main page') ||
-      phrase.includes('start') ||
-      phrase.includes('portal') ||
       phrase.includes('होम') ||
       phrase.includes('डैशबोर्ड')
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Navigating to homepage');
+      setLastActionStatus('Navigating to Homepage...');
       navigate('/');
       return true;
     }
 
     // 4. Chatbot / AI Assistant
     if (
-      phrase.includes('chatbot') ||
-      phrase.includes('chat') ||
-      phrase.includes('assistant') ||
-      phrase.includes('doubt') ||
-      phrase.includes('doubts') ||
-      phrase.includes('ai') ||
-      phrase.includes('bot') ||
-      phrase.includes('help') ||
-      phrase.includes('सहायक') ||
-      phrase.includes('संदेह') ||
-      phrase.includes('चैट')
+      phrase === 'chatbot' ||
+      phrase === 'chat' ||
+      phrase === 'assistant' ||
+      phrase.startsWith('open chatbot') ||
+      phrase.startsWith('open chat') ||
+      phrase.includes('ai assistant') ||
+      phrase.includes('चैटबॉट') ||
+      phrase.includes('सहायक')
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Opening meteorological assistant');
+      setLastActionStatus('Opening Meteorological Assistant...');
       navigate('/chatbot');
       return true;
     }
 
     // 5. Login
     if (
-      phrase.includes('login') ||
-      phrase.includes('log in') ||
-      phrase.includes('sign in') ||
-      phrase.includes('signin') ||
+      phrase === 'login' ||
+      phrase === 'log in' ||
+      phrase === 'sign in' ||
+      phrase.startsWith('open login') ||
       phrase.includes('लॉगिन')
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Opening login page');
+      setLastActionStatus('Opening Login Page...');
       navigate('/login');
       return true;
     }
 
     // 6. Signup
     if (
-      phrase.includes('signup') ||
-      phrase.includes('sign up') ||
-      phrase.includes('register') ||
-      phrase.includes('registration') ||
+      phrase === 'signup' ||
+      phrase === 'sign up' ||
+      phrase === 'register' ||
+      phrase.startsWith('open signup') ||
       phrase.includes('पंजीकरण')
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Opening registration page');
+      setLastActionStatus('Opening Registration...');
       navigate('/signup');
       return true;
     }
 
     // 7. Trainer Studio
     if (
-      phrase.includes('trainer') ||
-      phrase.includes('trainer studio') ||
-      phrase.includes('instructor') ||
-      phrase.includes('ट्रेनर') ||
+      phrase === 'trainer' ||
+      phrase === 'trainer studio' ||
+      phrase.startsWith('open trainer') ||
       phrase.includes('प्रशिक्षक')
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Opening Trainer Studio');
+      setLastActionStatus('Opening Trainer Studio...');
       navigate('/trainer');
       return true;
     }
 
     // 8. Admin Console
     if (
-      phrase.includes('admin') ||
-      phrase.includes('admin console') ||
-      phrase.includes('administrator') ||
+      phrase === 'admin' ||
+      phrase === 'admin console' ||
+      phrase.startsWith('open admin') ||
       phrase.includes('व्यवस्थापक') ||
       phrase.includes('एडमिन')
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Opening Admin Console');
+      setLastActionStatus('Opening Admin Console...');
       navigate('/admin');
       return true;
     }
 
-    // 9. Read Aloud / TTS Trigger
+    // 9. Camera Diagnostics
     if (
-      phrase.includes('read aloud') ||
-      phrase.includes('read notes') ||
-      phrase.includes('read this') ||
-      phrase.includes('read') ||
-      phrase.includes('listen') ||
-      phrase.includes('speak notes') ||
-      phrase.includes('बोलकर सुनाओ') ||
-      phrase.includes('सुनो') ||
-      phrase.includes('पढ़ो')
-    ) {
-      lastCmdTimeRef.current = now;
-      playTone(620, 0.1);
-      speakText('Reading study notes aloud');
-      window.dispatchEvent(new CustomEvent('imd-voice-read-aloud'));
-      return true;
-    }
-
-    // 10. Stop / Silence Active Speech
-    if (
-      phrase.includes('stop reading') ||
-      phrase.includes('stop audio') ||
-      phrase.includes('stop') ||
-      phrase.includes('quiet') ||
-      phrase.includes('silence') ||
-      phrase.includes('shut up') ||
-      phrase.includes('pause') ||
-      phrase.includes('रुको') ||
-      phrase.includes('शांत') ||
-      phrase.includes('बंद करो')
-    ) {
-      lastCmdTimeRef.current = now;
-      playTone(400, 0.1);
-      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-      window.dispatchEvent(new CustomEvent('imd-voice-stop'));
-      return true;
-    }
-
-    // 11. Camera Test Trigger
-    if (
-      phrase.includes('camera') ||
-      phrase.includes('webcam') ||
-      phrase.includes('test camera') ||
+      phrase === 'camera' ||
+      phrase === 'webcam' ||
+      phrase === 'test camera' ||
       phrase.includes('कैमरा')
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Opening camera diagnostics');
+      setLastActionStatus('Opening Camera Diagnostics...');
       navigate('/profile');
       window.dispatchEvent(new CustomEvent('imd-voice-test-camera'));
       return true;
     }
 
+    // 10. Read Aloud / TTS Trigger
+    if (
+      phrase === 'read aloud' ||
+      phrase === 'read notes' ||
+      phrase === 'read this' ||
+      phrase === 'listen' ||
+      phrase.includes('बोलकर सुनाओ') ||
+      phrase.includes('पढ़ो')
+    ) {
+      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
+      setLastActionStatus('Reading notes aloud...');
+      window.dispatchEvent(new CustomEvent('imd-voice-read-aloud'));
+      return true;
+    }
+
+    // 11. Stop / Silence Active Speech
+    if (
+      phrase === 'stop' ||
+      phrase === 'stop audio' ||
+      phrase === 'quiet' ||
+      phrase === 'silence' ||
+      phrase === 'रुको' ||
+      phrase === 'शांत'
+    ) {
+      lastCmdTimeRef.current = now;
+      playTone(400, 0.1);
+      setLastActionStatus('Audio stopped');
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      window.dispatchEvent(new CustomEvent('imd-voice-stop'));
+      return true;
+    }
+
     // 12. Submit Assessment Attempt
     if (
-      phrase.includes('submit assessment') ||
-      phrase.includes('submit test') ||
-      phrase.includes('finish assessment') ||
-      phrase.includes('submit') ||
-      phrase.includes('जमा करो') ||
+      phrase === 'submit assessment' ||
+      phrase === 'submit test' ||
+      phrase === 'finish assessment' ||
+      phrase === 'submit' ||
       phrase.includes('सबमिट')
     ) {
       lastCmdTimeRef.current = now;
       playTone(720, 0.15);
-      speakText('Submitting assessment');
+      setLastActionStatus('Submitting Assessment...');
       window.dispatchEvent(new CustomEvent('imd-voice-submit'));
       return true;
     }
 
     // 13. Next Question in Assessment
     if (
-      phrase.includes('next question') ||
-      phrase.includes('next') ||
+      phrase === 'next question' ||
+      phrase === 'next' ||
       phrase.includes('अगला प्रश्न') ||
-      phrase.includes('अगला')
+      phrase === 'अगला'
     ) {
       lastCmdTimeRef.current = now;
       playTone(620, 0.1);
-      speakText('Moving to next question');
+      setLastActionStatus('Next Question');
       window.dispatchEvent(new CustomEvent('imd-voice-next-question'));
       return true;
     }
 
     // 14. Previous Question in Assessment
     if (
-      phrase.includes('previous question') ||
-      phrase.includes('previous') ||
-      phrase.includes('back question') ||
+      phrase === 'previous question' ||
+      phrase === 'previous' ||
+      phrase === 'back' ||
       phrase.includes('पिछला प्रश्न') ||
-      phrase.includes('पिछला')
+      phrase === 'पिछला'
     ) {
       lastCmdTimeRef.current = now;
       playTone(520, 0.1);
-      speakText('Moving to previous question');
+      setLastActionStatus('Previous Question');
       window.dispatchEvent(new CustomEvent('imd-voice-prev-question'));
       return true;
     }
 
-    // 15. Option selection in MCQ ("Option A", "Select B", "Choose C", "विकल्प डी", or standalone "A", "B", "C", "D")
+    // 15. Option selection in MCQ ("Option A", "Select B", "विकल्प सी", or standalone "A", "B", "C", "D")
     const optionMatch = phrase.match(
       /(?:option|select|choose|answer|विकल्प)\s*([a-d])\b|^([a-d])$/i
     );
     if (optionMatch) {
       lastCmdTimeRef.current = now;
       const opt = (optionMatch[1] || optionMatch[2]).toUpperCase();
-      playTone(620, 0.1);
-      speakText(`Selected option ${opt}`);
+      playTone(650, 0.1);
+      setLastActionStatus(`Selected Option ${opt}`);
       window.dispatchEvent(new CustomEvent('imd-voice-option-select', { detail: opt }));
       return true;
     }
 
-    // 16. Auto-Fill Active Input Box on Screen (dictation / filling boxes)
-    const filledActive = fillActiveInput(phrase);
-    if (filledActive) {
-      playTone(720, 0.08);
-      console.log('[Auto-Filled Active Input]:', phrase);
+    // 16. Clear active input box
+    if (
+      phrase === 'clear' ||
+      phrase === 'clear box' ||
+      phrase === 'clear input' ||
+      phrase === 'erase' ||
+      phrase === 'मिटाओ'
+    ) {
+      lastCmdTimeRef.current = now;
+      fillActiveInput('');
+      playTone(450, 0.1);
+      setLastActionStatus('Cleared Input Box');
+      return true;
     }
 
-    // 17. General voice input broadcast (for assessments / chatbot / search)
-    window.dispatchEvent(new CustomEvent('imd-voice-general', { detail: phrase }));
+    // 17. UNIVERSAL DICTATION & BOX AUTO-FILL
+    // Spoken words automatically fill whatever input box is active or visible!
+    const cleanDictation = rawPhrase
+      .replace(/^(type|write|fill|search for|search|input|डालो|लिखो)\s+/i, '')
+      .trim();
+
+    const textToFill = cleanDictation || rawPhrase;
+    const filledActive = fillActiveInput(textToFill);
+
+    if (filledActive) {
+      playTone(720, 0.08);
+      setLastActionStatus(`Filled box: "${textToFill}"`);
+      console.log('[Auto-Filled Box With]:', textToFill);
+    } else {
+      setLastActionStatus(`Heard: "${rawPhrase}"`);
+    }
+
+    // 18. Broadcast for route-specific handlers (Chatbot, CourseBrowse, Assessment)
+    window.dispatchEvent(new CustomEvent('imd-voice-general', { detail: textToFill }));
+
     return filledActive;
   };
 
-  // Robust, continuous SpeechRecognition instance
+  // Simulates spoken voice phrase directly for testing or keyboard users
+  const simulateVoiceInput = (phrase: string): boolean => {
+    return processVoiceCommand(phrase);
+  };
+
+  // Dedicated, phrase-based SpeechRecognition session
+  // Using continuous: false eliminates the notorious Windows Chrome freeze/deadlock bug!
   const startNewListeningSession = () => {
     if (!isVoiceActiveRef.current || isPausedRef.current) return;
+    if (isSessionStartingRef.current || activeRecognitionRef.current) return;
 
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -475,95 +567,87 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
 
-    try {
-      // Abort lingering instance if any cleanly without triggering onend loops
-      if (activeRecognitionRef.current) {
-        try {
-          activeRecognitionRef.current.onend = null;
-          activeRecognitionRef.current.onerror = null;
-          activeRecognitionRef.current.abort();
-        } catch (e) {}
-        activeRecognitionRef.current = null;
-      }
+    isSessionStartingRef.current = true;
 
+    try {
       const recognition = new SpeechRecognition();
-      recognition.continuous = true; // Continuous listening across phrases
-      recognition.interimResults = true; // Stream instant transcripts
-      recognition.lang = 'en-IN'; // Indian English / accent optimized
+      recognition.continuous = false; // Fresh session per phrase prevents zombie hangs
+      recognition.interimResults = true;
+      recognition.lang = 'en-IN'; // Accent-resilient
 
       recognition.onstart = () => {
+        isSessionStartingRef.current = false;
         setIsListening(true);
       };
 
       recognition.onresult = (event: any) => {
-        let interimTranscript = '';
-        let finalTranscript = '';
+        let interim = '';
+        let final = '';
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const trans = event.results[i][0].transcript;
           if (event.results[i].isFinal) {
-            finalTranscript += trans + ' ';
+            final += trans + ' ';
           } else {
-            interimTranscript += trans + ' ';
+            interim += trans + ' ';
           }
         }
 
-        const candidatePhrase = (finalTranscript || interimTranscript).trim();
+        const candidatePhrase = (final || interim).trim();
         if (candidatePhrase) {
           setLastRecognizedPhrase(candidatePhrase);
-          processVoiceCommand(candidatePhrase);
+
+          // If result is final, execute command or box-fill immediately
+          if (final.trim()) {
+            processVoiceCommand(final.trim());
+          }
         }
       };
 
       recognition.onerror = (event: any) => {
-        // 'no-speech' is routine pause; keep continuous listening alive
-        if (event.error === 'no-speech') {
-          return;
-        }
+        isSessionStartingRef.current = false;
 
         if (event.error === 'not-allowed') {
-          setIsVoiceActive(false);
-          isVoiceActiveRef.current = false;
-          try {
-            localStorage.setItem('imd_voice_active', 'false');
-          } catch {}
-          setLastRecognizedPhrase('⚠️ Mic blocked. Click lock in address bar to Allow.');
+          setLastActionStatus('⚠️ Mic blocked. Click lock in address bar to Allow.');
           return;
         }
 
-        if (event.error === 'audio-capture') {
-          setLastRecognizedPhrase('⚠️ No microphone found or in use by another app.');
-          return;
+        // 'no-speech', 'aborted', and 'network' are transient; onend will re-arm cleanly
+        if (event.error !== 'no-speech') {
+          console.warn('[Speech Recognition Event]:', event.error);
         }
-
-        if (event.error === 'network') {
-          console.warn('Speech recognition network error, restarting...');
-          return;
-        }
-
-        console.warn('Speech recognition warning:', event.error);
       };
 
       recognition.onend = () => {
-        setIsListening(false);
+        isSessionStartingRef.current = false;
         activeRecognitionRef.current = null;
+        setIsListening(false);
 
-        // Auto-restart with fresh instance if voice control remains active and not paused
+        // Immediate clean re-arm if voice remains active
         if (isVoiceActiveRef.current && !isPausedRef.current) {
+          if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
           restartTimeoutRef.current = setTimeout(() => {
             if (isVoiceActiveRef.current && !isPausedRef.current) {
               startNewListeningSession();
             }
-          }, 300);
+          }, 80);
         }
       };
 
       activeRecognitionRef.current = recognition;
       recognition.start();
     } catch (err) {
-      console.warn('Session startup error:', err);
+      isSessionStartingRef.current = false;
+      activeRecognitionRef.current = null;
+      console.warn('Session startup catch:', err);
+
       if (isVoiceActiveRef.current && !isPausedRef.current) {
-        restartTimeoutRef.current = setTimeout(() => startNewListeningSession(), 600);
+        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+        restartTimeoutRef.current = setTimeout(() => {
+          if (isVoiceActiveRef.current && !isPausedRef.current) {
+            startNewListeningSession();
+          }
+        }, 300);
       }
     }
   };
@@ -578,9 +662,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         activeRecognitionRef.current.onend = null;
         activeRecognitionRef.current.onerror = null;
         activeRecognitionRef.current.abort();
-      } catch (e) {}
+      } catch {}
       activeRecognitionRef.current = null;
     }
+    isSessionStartingRef.current = false;
     setIsListening(false);
   };
 
@@ -596,7 +681,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  // Dedicated single-phrase capture utility without colliding with continuous listener
+  // Single-phrase capture utility
   const captureVoiceInput = (promptMessage?: string): Promise<string> => {
     return new Promise((resolve) => {
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -616,13 +701,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         resolve(val);
       };
 
-      // Safety timeout: 9 seconds max
-      const safetyTimer = setTimeout(() => {
-        safeResolve('');
-      }, 9000);
+      const safetyTimer = setTimeout(() => safeResolve(''), 9000);
 
       try {
-        playTone(580, 0.12); // Instant pleasant prompt chime
+        playTone(580, 0.12);
 
         const rec = new SR();
         rec.lang = 'en-IN';
@@ -646,14 +728,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         rec.onend = () => {
           clearTimeout(safetyTimer);
-          if (captured) {
-            playTone(680, 0.12);
-          }
+          if (captured) playTone(680, 0.12);
           safeResolve(captured);
         };
 
         rec.start();
-      } catch (e) {
+      } catch {
         clearTimeout(safetyTimer);
         safeResolve('');
       }
@@ -665,7 +745,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert('Speech Recognition is not available in this browser. Please use Google Chrome or Microsoft Edge.');
+      alert(
+        'Speech Recognition is not available in this browser. Please use Google Chrome or Microsoft Edge.'
+      );
       return;
     }
 
@@ -676,17 +758,19 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         localStorage.setItem('imd_voice_active', 'false');
       } catch {}
       stopActiveSession();
+      stopMicAudioMeter();
       playTone(320, 0.15);
-      speakText('Voice navigation turned off');
+      setLastActionStatus('Voice turned off');
     } else {
       // Request mic permission first
       try {
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          stream.getTracks().forEach((t) => t.stop());
+        if (typeof navigator?.mediaDevices?.getUserMedia === 'function') {
+          await startMicAudioMeter();
         }
       } catch (err) {
-        alert('Microphone permission is required. Please click the lock or camera icon in your browser address bar and allow Microphone.');
+        alert(
+          'Microphone permission is required. Please click the lock or camera icon in your browser address bar and allow Microphone.'
+        );
         return;
       }
 
@@ -695,13 +779,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       try {
         localStorage.setItem('imd_voice_active', 'true');
       } catch {}
-      playTone(550, 0.15);
 
-      // Start recognition IMMEDIATELY without waiting for speech!
+      // Instant pleasant ascending chime: signals LIVE listening without blocking speech
+      playTone(520, 0.1);
+      setTimeout(() => playTone(780, 0.15), 120);
+      setLastActionStatus('🎙️ Listening for commands or box-filling...');
+
+      // Start recognition immediately!
       startNewListeningSession();
-
-      // Vocal welcome notification (non-blocking)
-      speakText('Voice navigation active. Speak courses, certificates, home, or chatbot.');
     }
   };
 
@@ -711,11 +796,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (saved === 'true') {
         setIsVoiceActive(true);
         isVoiceActiveRef.current = true;
+        startMicAudioMeter();
         startNewListeningSession();
         return;
       }
 
-      // If user has already granted microphone permissions, auto-activate hands-free listening
+      // Check if permission already granted
       if (saved === null && navigator.permissions?.query) {
         try {
           const perm = await navigator.permissions.query({ name: 'microphone' as PermissionName });
@@ -723,9 +809,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setIsVoiceActive(true);
             isVoiceActiveRef.current = true;
             localStorage.setItem('imd_voice_active', 'true');
+            startMicAudioMeter();
             startNewListeningSession();
           }
-        } catch (e) {}
+        } catch {}
       }
     };
 
@@ -733,6 +820,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     return () => {
       stopActiveSession();
+      stopMicAudioMeter();
     };
   }, []);
 
@@ -742,13 +830,16 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         isVoiceActive,
         toggleVoice,
         lastRecognizedPhrase,
+        lastActionStatus,
         isListening,
+        audioLevel,
         supported,
         speakText,
         playTone,
         pauseListening,
         resumeListening,
         captureVoiceInput,
+        simulateVoiceInput,
       }}
     >
       {children}
