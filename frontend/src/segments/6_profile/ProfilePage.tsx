@@ -667,22 +667,18 @@ export const ProfilePage: React.FC = () => {
                 }}
                 className="w-full text-[11px] rounded-lg border border-slate-300 p-1.5 bg-white font-medium text-slate-800"
               >
-                <option value="auto">🌟 Auto-Detect (Prioritizes Real Laptop Webcam)</option>
-                <option value="simulated">🧑‍💻 OpenCV Live Simulated Face Feed (Proctoring Test Mode)</option>
-                {availableDevices.map((d, i) => {
-                  const lbl = d.label || '';
-                  const isPhoneLink =
-                    lbl.toLowerCase().includes('phone') ||
-                    lbl.toLowerCase().includes('link to windows') ||
-                    lbl.toLowerCase().includes('virtual');
-                  return (
-                    <option key={d.deviceId || i} value={d.deviceId}>
-                      {isPhoneLink
-                        ? `📱 ${lbl} (Phone Link - Requires paired phone)`
-                        : `📷 ${lbl || `Physical Webcam ${i + 1}`}`}
-                    </option>
-                  );
-                })}
+                  <option value="auto">🌟 Auto-Detect (Real Integrated Camera)</option>
+                  <option value="simulated">🧑‍💻 OpenCV Live Simulated Face Feed (Proctoring Test Mode)</option>
+                  {availableDevices
+                    .filter((d) => {
+                      const lbl = (d.label || '').toLowerCase();
+                      return !lbl.includes('phone') && !lbl.includes('link to windows') && !lbl.includes('12403');
+                    })
+                    .map((d, i) => (
+                      <option key={d.deviceId || i} value={d.deviceId}>
+                        {`📷 ${d.label || `Physical Camera ${i + 1}`}`}
+                      </option>
+                    ))}
               </select>
             </div>
 

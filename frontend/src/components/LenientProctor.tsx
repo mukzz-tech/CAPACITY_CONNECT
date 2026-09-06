@@ -259,11 +259,16 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
               >
                 <option value="auto">Default: Auto Physical Webcam</option>
                 <option value="simulated">OpenCV Simulated Face Feed</option>
-                {availableDevices.map((d, i) => (
-                  <option key={d.deviceId || i} value={d.deviceId}>
-                    {d.label || `Camera Device #${i + 1}`}
-                  </option>
-                ))}
+                {availableDevices
+                  .filter((d) => {
+                    const lbl = (d.label || '').toLowerCase();
+                    return !lbl.includes('phone') && !lbl.includes('link to windows') && !lbl.includes('12403');
+                  })
+                  .map((d, i) => (
+                    <option key={d.deviceId || i} value={d.deviceId}>
+                      {`📷 ${d.label || `Physical Camera #${i + 1}`}`}
+                    </option>
+                  ))}
               </select>
 
               {/* Auto-Pause Toggle */}

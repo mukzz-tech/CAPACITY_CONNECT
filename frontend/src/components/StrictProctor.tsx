@@ -248,22 +248,18 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
           }}
           className="flex-1 text-[11px] rounded-lg border border-slate-700 p-1 bg-slate-800 text-slate-200 font-medium"
         >
-          <option value="auto">🌟 Auto-Detect (Prioritizes Physical Webcam)</option>
+          <option value="auto">🌟 Auto-Detect (Real Integrated Camera)</option>
           <option value="simulated">🧑‍💻 OpenCV Live Simulated Feed (Proctoring Test Mode)</option>
-          {availableDevices.map((d, i) => {
-            const lbl = d.label || '';
-            const isPhoneLink =
-              lbl.toLowerCase().includes('phone') ||
-              lbl.toLowerCase().includes('link to windows') ||
-              lbl.toLowerCase().includes('virtual');
-            return (
+          {availableDevices
+            .filter((d) => {
+              const lbl = (d.label || '').toLowerCase();
+              return !lbl.includes('phone') && !lbl.includes('link to windows') && !lbl.includes('12403');
+            })
+            .map((d, i) => (
               <option key={d.deviceId || i} value={d.deviceId}>
-                {isPhoneLink
-                  ? `📱 ${lbl} (Phone Link - Requires paired phone)`
-                  : `📷 ${lbl || `Physical Camera ${i + 1}`}`}
+                {`📷 ${d.label || `Physical Camera ${i + 1}`}`}
               </option>
-            );
-          })}
+            ))}
         </select>
       </div>
 
