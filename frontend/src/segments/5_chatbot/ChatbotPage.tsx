@@ -53,19 +53,40 @@ export const ChatbotPage: React.FC = () => {
     scrollToBottom();
   }, [messages]);
 
+  const chatbotAudioRef = useRef<HTMLAudioElement | null>(null);
+
   const speakAloud = (text: string) => {
-    if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
     // Clean markdown before speaking
     const clean = text
       .replace(/#+\s+/g, '')
       .replace(/\*\*(.*?)\*\*/g, '$1')
       .replace(/\*(.*?)\*/g, '$1')
       .replace(/•\s*/g, '')
-      .replace(/`{1,3}(.*?)`{1,3}/g, '$1');
+      .replace(/`{1,3}(.*?)`{1,3}/g, '$1')
+      .trim();
+
+    if (!clean) return;
+
+    // Check if text has Devanagari Hindi characters
+    const hasHindi = /[\u0900-\u097F]/.test(clean);
+
+    if (hasHindi) {
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      if (chatbotAudioRef.current) {
+        chatbotAudioRef.current.pause();
+      }
+      const audio = new Audio(`/api/tts?text=${encodeURIComponent(clean.substring(0, 180))}&lang=hi`);
+      chatbotAudioRef.current = audio;
+      audio.play().catch(console.warn);
+      return;
+    }
+
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.rate = 1.0;
+    utterance.lang = 'en-US';
     const voices = window.speechSynthesis.getVoices();
     const matched = voices.find((v) => v.lang.includes('en'));
     if (matched) utterance.voice = matched;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -13,6 +13,10 @@ import {
   Globe,
   Mic,
   Eye,
+  Video,
+  Volume2,
+  CheckCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { Certificate } from '../../types';
 
@@ -81,6 +85,82 @@ export const ProfilePage: React.FC = () => {
     } finally {
       setSavingSettings(false);
     }
+  };
+
+  // Hardware Diagnostics State & Handlers
+  const [testCameraActive, setTestCameraActive] = useState<boolean>(false);
+  const [cameraStatusMsg, setCameraStatusMsg] = useState<string>('');
+  const [testAudioPlaying, setTestAudioPlaying] = useState<boolean>(false);
+  const [micTesting, setMicTesting] = useState<boolean>(false);
+  const [micHeardText, setMicHeardText] = useState<string>('');
+  const testVideoRef = useRef<HTMLVideoElement | null>(null);
+  const testStreamRef = useRef<MediaStream | null>(null);
+
+  const handleTestWebcam = async () => {
+    if (testCameraActive) {
+      if (testStreamRef.current) {
+        testStreamRef.current.getTracks().forEach((t) => t.stop());
+        testStreamRef.current = null;
+      }
+      setTestCameraActive(false);
+      setCameraStatusMsg('');
+      return;
+    }
+
+    setCameraStatusMsg('Requesting camera permission...');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+        audio: false,
+      });
+      testStreamRef.current = stream;
+      setTestCameraActive(true);
+      setCameraStatusMsg('Webcam is working! Live local preview active.');
+      setTimeout(() => {
+        if (testVideoRef.current) {
+          testVideoRef.current.srcObject = stream;
+          testVideoRef.current.play().catch(console.warn);
+        }
+      }, 100);
+    } catch (err: any) {
+      setTestCameraActive(false);
+      setCameraStatusMsg(`Camera test failed: ${err?.message || 'Access blocked or device not found'}`);
+    }
+  };
+
+  const handleTestAudio = (lang: 'hi' | 'en') => {
+    setTestAudioPlaying(true);
+    const text = lang === 'hi' 
+      ? 'नमस्ते! क्षमता कनेक्ट पोर्टल में आपका स्वागत है। हिंदी ऑडियो और टेक्स्ट टू स्पीच पूरी तरह सक्रिय है।'
+      : 'Welcome to IMD Capacity Connect. English text-to-speech is fully operational.';
+    
+    const audio = new Audio(`/api/tts?text=${encodeURIComponent(text)}&lang=${lang}`);
+    audio.onended = () => setTestAudioPlaying(false);
+    audio.onerror = () => setTestAudioPlaying(false);
+    audio.play().catch(() => setTestAudioPlaying(false));
+  };
+
+  const handleTestMic = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      alert('Speech Recognition not supported in this browser. Please use Chrome or Edge.');
+      return;
+    }
+    setMicTesting(true);
+    setMicHeardText('Listening... Please speak any word into your microphone now.');
+    const rec = new SR();
+    rec.lang = 'en-US';
+    rec.onresult = (e: any) => {
+      const text = e.results[0][0].transcript;
+      setMicHeardText(`Microphone heard: "${text}" (Microphone 100% Operational)`);
+      setMicTesting(false);
+    };
+    rec.onerror = (e: any) => {
+      setMicHeardText(`Microphone error: ${e.error}`);
+      setMicTesting(false);
+    };
+    rec.onend = () => setMicTesting(false);
+    rec.start();
   };
 
   return (
@@ -325,6 +405,138 @@ export const ProfilePage: React.FC = () => {
         >
           {savingSettings ? 'Saving...' : 'Save Preferences'}
         </button>
+      </div>
+
+      {/* Candidate Hardware & Diagnostics Self-Test */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-6">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2">
+            <Video className="w-5 h-5 text-blue-600" />
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">
+                Candidate Hardware Readiness & Device Diagnostics
+              </h2>
+              <p className="text-xs text-slate-500">
+                Verify your webcam, speakers, and microphone before starting strict-proctored assessments.
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] bg-blue-100 text-blue-800 font-mono font-bold px-2.5 py-1 rounded-full">
+            Self-Check Studio
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs">
+          {/* 1. Camera Diagnostic */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                <Video className="w-4 h-4 text-blue-600" />
+                1. Webcam Test
+              </span>
+              <button
+                type="button"
+                onClick={handleTestWebcam}
+                className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition ${
+                  testCameraActive
+                    ? 'bg-rose-600 text-white'
+                    : 'bg-blue-600 text-white hover:bg-blue-500'
+                }`}
+              >
+                {testCameraActive ? 'Stop Webcam' : 'Test Camera'}
+              </button>
+            </div>
+
+            <div className="w-full h-32 bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center relative border border-slate-700">
+              <video
+                ref={testVideoRef}
+                autoPlay
+                muted
+                playsInline
+                className={`w-full h-full object-cover transform -scale-x-100 ${
+                  testCameraActive ? 'block' : 'hidden'
+                }`}
+              />
+              {!testCameraActive && (
+                <span className="text-slate-400 text-[11px] text-center px-4">
+                  Click "Test Camera" to request browser permission & view feed
+                </span>
+              )}
+            </div>
+
+            {cameraStatusMsg && (
+              <p className="text-[11px] text-slate-600 font-mono leading-tight">
+                {cameraStatusMsg}
+              </p>
+            )}
+          </div>
+
+          {/* 2. Audio / TTS Diagnostic */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+            <span className="font-bold text-slate-800 flex items-center gap-1.5">
+              <Volume2 className="w-4 h-4 text-emerald-600" />
+              2. Speaker & Bilingual TTS Test
+            </span>
+            <p className="text-[11px] text-slate-500">
+              Plays test speech in both languages to confirm speaker output and natural voice synthesis.
+            </p>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => handleTestAudio('hi')}
+                disabled={testAudioPlaying}
+                className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition flex items-center justify-center gap-1.5 shadow-sm"
+              >
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>Test Hindi Voice (हिंदी ऑडियो)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleTestAudio('en')}
+                disabled={testAudioPlaying}
+                className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs transition flex items-center justify-center gap-1.5"
+              >
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>Test English Voice</span>
+              </button>
+            </div>
+            {testAudioPlaying && (
+              <span className="text-[10px] text-emerald-600 font-bold animate-pulse block text-center">
+                Playing sample audio...
+              </span>
+            )}
+          </div>
+
+          {/* 3. Microphone Diagnostic */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                <Mic className="w-4 h-4 text-indigo-600" />
+                3. Microphone Voice Test
+              </span>
+              <button
+                type="button"
+                onClick={handleTestMic}
+                disabled={micTesting}
+                className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition ${
+                  micTesting ? 'bg-red-600 text-white animate-pulse' : 'bg-indigo-600 text-white hover:bg-indigo-500'
+                }`}
+              >
+                {micTesting ? 'Listening...' : 'Test Mic'}
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-500">
+              Verifies browser speech-to-text recognition for spoken assessments and navigation.
+            </p>
+
+            <div className="p-3 bg-white rounded-xl border border-slate-200 min-h-[60px] text-[11px] text-slate-700">
+              {micHeardText || 'Click "Test Mic" and say something to verify speech recognition.'}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
