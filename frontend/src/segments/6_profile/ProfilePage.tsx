@@ -19,6 +19,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { Certificate } from '../../types';
+import { getCameraStream, releaseCameraStream, attachStreamToVideo } from '../../utils/cameraManager';
 
 export const ProfilePage: React.FC = () => {
   const { user, refreshUser } = useAuth();
@@ -98,9 +99,10 @@ export const ProfilePage: React.FC = () => {
 
   const handleTestWebcam = async () => {
     if (testCameraActive) {
-      if (testStreamRef.current) {
-        testStreamRef.current.getTracks().forEach((t) => t.stop());
-        testStreamRef.current = null;
+      releaseCameraStream();
+      testStreamRef.current = null;
+      if (testVideoRef.current) {
+        testVideoRef.current.srcObject = null;
       }
       setTestCameraActive(false);
       setCameraStatusMsg('');
@@ -109,24 +111,26 @@ export const ProfilePage: React.FC = () => {
 
     setCameraStatusMsg('Requesting camera permission...');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-        audio: false,
-      });
+      const stream = await getCameraStream();
       testStreamRef.current = stream;
       setTestCameraActive(true);
       setCameraStatusMsg('Webcam is working! Live local preview active.');
-      setTimeout(() => {
-        if (testVideoRef.current) {
-          testVideoRef.current.srcObject = stream;
-          testVideoRef.current.play().catch(console.warn);
-        }
-      }, 100);
+      if (testVideoRef.current) {
+        attachStreamToVideo(testVideoRef.current, stream);
+      }
     } catch (err: any) {
       setTestCameraActive(false);
       setCameraStatusMsg(`Camera test failed: ${err?.message || 'Access blocked or device not found'}`);
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (testCameraActive) {
+        releaseCameraStream();
+      }
+    };
+  }, [testCameraActive]);
 
   const handleTestAudio = (lang: 'hi' | 'en') => {
     setTestAudioPlaying(true);

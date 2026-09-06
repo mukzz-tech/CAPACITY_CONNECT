@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ShieldAlert, ShieldCheck, Eye, Video, VideoOff, RefreshCw, Sparkles, AlertTriangle } from 'lucide-react';
+import { getCameraStream, releaseCameraStream, attachStreamToVideo } from '../utils/cameraManager';
 
 interface StrictProctorProps {
   attemptId: string;
@@ -67,79 +68,50 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
     }
   }, [attemptId, onIntegrityChange]);
 
-  // Stop camera tracks cleanly
+  // Stop camera stream cleanly
   const stopTracks = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => {
-        track.stop();
-      });
-      streamRef.current = null;
-    }
+    releaseCameraStream();
+    streamRef.current = null;
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    setHasWebcam(false);
+    setStatusMessage('Camera turned off');
   };
 
-  // Start hardware camera with multi-tier constraint fallback
+  // Start hardware camera using shared camera manager
   const startCamera = async () => {
     setIsRequesting(true);
     setErrorMessage(null);
     setStatusMessage('Requesting camera access...');
-    stopTracks();
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setErrorMessage('Media devices API not supported by this browser. (Use Chrome/Edge)');
-      setStatusMessage('Camera API Unavailable');
-      setIsRequesting(false);
-      return;
-    }
-
-    const constraintOptions = [
-      { video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }, audio: false },
-      { video: { width: { ideal: 320 }, height: { ideal: 240 } }, audio: false },
-      { video: true, audio: false },
-    ];
-
-    let stream: MediaStream | null = null;
-    let lastErr: any = null;
-
-    for (const constraints of constraintOptions) {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        if (stream) break;
-      } catch (err: any) {
-        lastErr = err;
-      }
-    }
-
-    if (stream && videoRef.current) {
+    try {
+      const stream = await getCameraStream();
       streamRef.current = stream;
-      videoRef.current.srcObject = stream;
-      videoRef.current.onloadedmetadata = () => {
-        if (videoRef.current) {
-          videoRef.current.play().catch(console.warn);
-        }
-      };
+      if (videoRef.current) {
+        attachStreamToVideo(videoRef.current, stream);
+      }
 
       setHasWebcam(true);
       setIsSimulatedMode(false);
       setStatusMessage('Attentiveness verified (1 Face Present)');
       setErrorMessage(null);
-    } else {
+    } catch (lastErr: any) {
       console.warn('Could not open camera:', lastErr);
       setHasWebcam(false);
       if (lastErr?.name === 'NotAllowedError' || lastErr?.name === 'PermissionDeniedError') {
-        setErrorMessage('Camera access was blocked. Please click the camera/lock icon in your browser address bar to allow access, then click "Try Again".');
+        setErrorMessage('Camera access was blocked. Please click the camera or lock icon in your browser address bar (left of localhost:5173), select "Allow", and click "Turn On Camera".');
       } else if (lastErr?.name === 'NotFoundError' || lastErr?.name === 'DevicesNotFoundError') {
         setErrorMessage('No camera hardware detected on this machine. You can click "Simulated Face Test" below to test proctoring.');
       } else if (lastErr?.name === 'NotReadableError' || lastErr?.name === 'TrackStartError') {
-        setErrorMessage('Camera is currently in use by another application (e.g. Zoom or another browser tab). Please close other apps and try again.');
+        setErrorMessage('Camera is currently in use by another application (e.g. Zoom, Teams, or another browser tab). Please close other apps and click "Turn On Camera".');
       } else {
         setErrorMessage(`Camera error: ${lastErr?.message || 'Unable to open video stream'}`);
       }
       setStatusMessage('Camera Inactive');
+    } finally {
+      setIsRequesting(false);
     }
-    setIsRequesting(false);
   };
 
   // Start simulated test feed (fallback for systems without camera or testing)
@@ -156,7 +128,7 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
     startCamera();
 
     return () => {
-      stopTracks();
+      releaseCameraStream();
     };
   }, []);
 
