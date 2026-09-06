@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Coffee, Play, Info, Video, VideoOff, Eye, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { getCameraStream, releaseCameraStream, attachStreamToVideo } from '../utils/cameraManager';
+import { analyzeVideoFrame } from '../utils/visionProctor';
 
 interface LenientProctorProps {
   onPauseRequested?: () => void;
@@ -52,43 +53,18 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
 
   // Frame attentiveness monitor (~1 check per second)
   useEffect(() => {
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       if (hasWebcam && videoRef.current && canvasRef.current && !showNudge) {
         const video = videoRef.current;
         const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-        if (ctx && video.readyState >= 2) {
-          canvas.width = 120;
-          canvas.height = 90;
-          ctx.drawImage(video, 0, 0, 120, 90);
+        if (video.readyState >= 2) {
+          const res = await analyzeVideoFrame(video, canvas);
 
-          const frame = ctx.getImageData(0, 0, 120, 90);
-          const data = frame.data;
-
-          let centerLum = 0;
-          let totalPixels = 0;
-
-          for (let i = 0; i < data.length; i += 16) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-            const x = (i / 4) % 120;
-            if (x > 30 && x < 90) {
-              centerLum += lum;
-              totalPixels++;
-            }
-          }
-
-          const avgCenter = centerLum / (totalPixels || 1);
-          // If candidate has stepped away or covered camera for sustained period (>12s)
-          const isAbsent = avgCenter < 20;
-
-          if (isAbsent) {
+          if (res.condition === 'NO_FACE_DETECTED') {
             awayCountRef.current += 1;
             setIsAttentive(false);
-            if (awayCountRef.current >= 12) {
+            if (awayCountRef.current >= 8) {
               setShowNudge(true);
               if (onPauseRequested) onPauseRequested();
             }

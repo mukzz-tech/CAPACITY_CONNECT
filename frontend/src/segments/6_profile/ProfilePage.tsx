@@ -27,6 +27,7 @@ import {
   setSimulatedGaze,
   getSimulatedGaze,
 } from '../../utils/cameraManager';
+import { analyzeVideoFrame } from '../../utils/visionProctor';
 
 export const ProfilePage: React.FC = () => {
   const { user, refreshUser } = useAuth();
@@ -104,8 +105,16 @@ export const ProfilePage: React.FC = () => {
   const [testAudioPlaying, setTestAudioPlaying] = useState<boolean>(false);
   const [micTesting, setMicTesting] = useState<boolean>(false);
   const [micHeardText, setMicHeardText] = useState<string>('');
+  const [micVolumeLevel, setMicVolumeLevel] = useState<number>(0);
+  const [visionCondition, setVisionCondition] = useState<string>('NORMAL');
+  const [visionGaze, setVisionGaze] = useState<string>('center');
+
   const testVideoRef = useRef<HTMLVideoElement | null>(null);
+  const testCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const testStreamRef = useRef<MediaStream | null>(null);
+  const micAudioCtxRef = useRef<AudioContext | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micAnimFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     getVideoDevices().then((devs) => {
@@ -142,7 +151,7 @@ export const ProfilePage: React.FC = () => {
       } else {
         const devs = await getVideoDevices();
         setAvailableDevices(devs);
-        setCameraStatusMsg('Camera hardware active and streaming!');
+        setCameraStatusMsg('🟢 Camera hardware active • OpenCV frame analysis running...');
       }
 
       if (testVideoRef.current) {
@@ -154,27 +163,52 @@ export const ProfilePage: React.FC = () => {
     }
   };
 
+  // Live Computer Vision frame analysis loop for the test camera
+  useEffect(() => {
+    if (!testCameraActive || selectedCameraMode === 'simulated') return;
+
+    const interval = setInterval(async () => {
+      if (testVideoRef.current && testCanvasRef.current) {
+        const res = await analyzeVideoFrame(testVideoRef.current, testCanvasRef.current);
+        setVisionCondition(res.condition);
+        setVisionGaze(res.gazeDirection);
+
+        if (res.condition === 'NO_FACE_DETECTED') {
+          setCameraStatusMsg('🔴 FLAG: No face detected in frame (Stepped away or covered -10 pts)');
+        } else if (res.condition === 'FACE_TURNED_AWAY') {
+          setCameraStatusMsg(`🟡 FLAG: Face turned away / looking ${res.gazeDirection} (-5 pts)`);
+        } else if (res.condition === 'MULTIPLE_FACES_DETECTED') {
+          setCameraStatusMsg('🟣 FLAG: Multiple faces detected (Secondary person in frame -15 pts)');
+        } else {
+          setCameraStatusMsg('🟢 Normal: 1 Face Detected & Focused (100% Attentiveness)');
+        }
+      }
+    }, 700);
+
+    return () => clearInterval(interval);
+  }, [testCameraActive, selectedCameraMode]);
+
   const handleSimGazeChange = (gaze: 'center' | 'away' | 'absent') => {
     setSimulatedGaze(gaze);
     setSimGazeState(gaze);
     if (gaze === 'center') {
-      setCameraStatusMsg('OpenCV Result: Face Centered & Focused • 100/100 Normal');
+      setVisionCondition('NORMAL');
+      setCameraStatusMsg('🟢 OpenCV Result: Face Centered & Focused • 100/100 Normal');
     } else if (gaze === 'away') {
-      setCameraStatusMsg('OpenCV Result: FLAG_FACE_TURNED_AWAY (-5 pts deduction)');
+      setVisionCondition('FACE_TURNED_AWAY');
+      setCameraStatusMsg('🟡 OpenCV Result: FLAG_FACE_TURNED_AWAY (-5 pts deduction)');
     } else {
-      setCameraStatusMsg('OpenCV Result: FLAG_NO_FACE_DETECTED (-10 pts deduction)');
+      setVisionCondition('NO_FACE_DETECTED');
+      setCameraStatusMsg('🔴 OpenCV Result: FLAG_NO_FACE_DETECTED (-10 pts deduction)');
     }
   };
-
-  useEffect(() => {
-    getVideoDevices().then(setAvailableDevices).catch(console.warn);
-  }, []);
 
   useEffect(() => {
     return () => {
       if (testCameraActive) {
         releaseCameraStream();
       }
+      stopMicTest();
     };
   }, [testCameraActive]);
 
@@ -190,52 +224,124 @@ export const ProfilePage: React.FC = () => {
     audio.play().catch(() => setTestAudioPlaying(false));
   };
 
+  const stopMicTest = () => {
+    if (micAnimFrameRef.current) {
+      cancelAnimationFrame(micAnimFrameRef.current);
+      micAnimFrameRef.current = null;
+    }
+    if (micAudioCtxRef.current) {
+      try {
+        micAudioCtxRef.current.close();
+      } catch {}
+      micAudioCtxRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
+    }
+    setMicTesting(false);
+    setMicVolumeLevel(0);
+  };
+
   const handleTestMic = async () => {
+    if (micTesting) {
+      stopMicTest();
+      return;
+    }
+
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
       alert('Speech Recognition not supported in this browser. Please use Chrome or Edge.');
       return;
     }
 
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-        s.getTracks().forEach((t) => t.stop());
-      }
-    } catch (e) {
-      setMicHeardText('Microphone permission blocked. Please allow mic in browser settings.');
-      return;
-    }
-
     setMicTesting(true);
-    setMicHeardText('Listening... Please speak any word into your microphone now (e.g. "Radar", "Weather", "Courses").');
+    setMicHeardText('Opening microphone and measuring audio levels...');
 
-    const rec = new SR();
-    rec.lang = 'en-IN';
-    rec.continuous = false;
-    rec.interimResults = false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
 
-    rec.onresult = (e: any) => {
-      const text = e.results[0][0].transcript;
-      setMicHeardText(`Microphone heard: "${text}" (Microphone 100% Operational)`);
-      setMicTesting(false);
-      try {
-        const utterance = new SpeechSynthesisUtterance(`Microphone verified. Heard: ${text}`);
-        window.speechSynthesis.speak(utterance);
-      } catch (err) {}
-    };
+      // AudioContext + Analyser for real-time VU Meter
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      micAudioCtxRef.current = audioCtx;
 
-    rec.onerror = (e: any) => {
-      if (e.error !== 'no-speech') {
-        setMicHeardText(`Microphone status: ${e.error}. Try speaking louder.`);
-      } else {
-        setMicHeardText('No speech detected. Please speak into your microphone and click Test Mic again.');
-      }
-      setMicTesting(false);
-    };
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 128;
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
 
-    rec.onend = () => setMicTesting(false);
-    rec.start();
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      let detectedAudio = false;
+
+      const checkAudioLevel = () => {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        const volPct = Math.min(100, Math.round((avg / 64) * 100));
+        setMicVolumeLevel(volPct);
+
+        if (volPct > 6) {
+          detectedAudio = true;
+        }
+
+        micAnimFrameRef.current = requestAnimationFrame(checkAudioLevel);
+      };
+      checkAudioLevel();
+
+      // Launch continuous recognition with live interim feedback
+      const rec = new SR();
+      rec.lang = 'en-IN';
+      rec.continuous = true;
+      rec.interimResults = true;
+
+      setMicHeardText('🎙️ Microphone LIVE! Speak now (e.g. "Radar", "Weather", "Courses", "Hello")...');
+
+      rec.onresult = (e: any) => {
+        let transcript = '';
+        for (let i = 0; i < e.results.length; i++) {
+          transcript += e.results[i][0].transcript + ' ';
+        }
+        transcript = transcript.trim();
+
+        if (transcript) {
+          setMicHeardText(`✅ Microphone heard: "${transcript}" (100% Operational)`);
+          try {
+            const utterance = new SpeechSynthesisUtterance(`Microphone verified. Heard: ${transcript}`);
+            window.speechSynthesis.speak(utterance);
+          } catch {}
+          setTimeout(() => stopMicTest(), 2200);
+        }
+      };
+
+      rec.onerror = (e: any) => {
+        if (e.error === 'no-speech') {
+          if (!detectedAudio) {
+            setMicHeardText('⚠️ No sound picked up by microphone. Check Windows Settings -> Sound -> Input to verify your microphone is not muted and volume is 80-100%.');
+          } else {
+            setMicHeardText('Audio sound was detected, but no clear words were recognized. Please speak closer to your microphone and click Test Mic again.');
+          }
+        } else if (e.error === 'not-allowed') {
+          setMicHeardText('Microphone permission blocked. Please click the lock icon in your browser address bar and choose Allow.');
+        } else {
+          setMicHeardText(`Microphone error: ${e.error}. Try speaking louder.`);
+        }
+        stopMicTest();
+      };
+
+      rec.onend = () => {
+        if (micTesting) stopMicTest();
+      };
+
+      rec.start();
+    } catch (err: any) {
+      setMicHeardText('Microphone access blocked. Please allow microphone permissions in your browser address bar.');
+      stopMicTest();
+    }
   };
 
   return (
@@ -581,6 +687,8 @@ export const ProfilePage: React.FC = () => {
                   testCameraActive ? 'block' : 'hidden'
                 }`}
               />
+              <canvas ref={testCanvasRef} className="hidden" />
+
               {!testCameraActive && (
                 <div className="text-center px-4 space-y-1">
                   <span className="text-slate-400 text-[10px] block">
@@ -589,25 +697,55 @@ export const ProfilePage: React.FC = () => {
                 </div>
               )}
 
+              {/* Dynamic Live Face Target Tracking Overlay */}
+              {testCameraActive && (
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  <div
+                    className={`w-28 h-32 border-2 border-dashed rounded-2xl transition-all duration-200 flex flex-col justify-between p-1.5 ${
+                      visionCondition === 'NORMAL'
+                        ? 'border-emerald-400 bg-emerald-500/10'
+                        : visionCondition === 'FACE_TURNED_AWAY'
+                        ? 'border-amber-400 bg-amber-500/15 animate-pulse'
+                        : 'border-rose-500 bg-rose-500/20 animate-bounce'
+                    }`}
+                  >
+                    <span
+                      className={`text-[8px] font-mono px-1 rounded self-start font-bold ${
+                        visionCondition === 'NORMAL'
+                          ? 'bg-emerald-950/80 text-emerald-300'
+                          : visionCondition === 'FACE_TURNED_AWAY'
+                          ? 'bg-amber-950 text-amber-200'
+                          : 'bg-rose-950 text-rose-200'
+                      }`}
+                    >
+                      {visionCondition === 'NORMAL' ? 'FACE FOCUSED' : visionCondition}
+                    </span>
+                    <span className="text-[8px] bg-black/80 text-slate-300 font-mono px-1 rounded self-end">
+                      GAZE: {visionGaze.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {testCameraActive && selectedCameraMode === 'simulated' && (
-                <div className="absolute top-1 right-1 bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-[9px] px-1.5 py-0.5 rounded font-mono font-bold">
+                <div className="absolute top-1 right-1 bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-[9px] px-1.5 py-0.5 rounded font-mono font-bold z-10">
                   OPENCV ACTIVE
                 </div>
               )}
             </div>
 
             {/* OpenCV Simulation Controls */}
-            {testCameraActive && selectedCameraMode === 'simulated' && (
+            {testCameraActive && (
               <div className="space-y-1 pt-1 bg-indigo-50/80 p-2 rounded-xl border border-indigo-100">
                 <span className="text-[10px] text-indigo-900 font-bold block">
-                  Test OpenCV Head/Gaze Detection Signals:
+                  Interactive OpenCV Detection Signal Tests:
                 </span>
                 <div className="flex gap-1">
                   <button
                     type="button"
                     onClick={() => handleSimGazeChange('center')}
                     className={`flex-1 py-1 rounded text-[10px] font-bold transition ${
-                      simGazeState === 'center' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700'
+                      visionCondition === 'NORMAL' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700'
                     }`}
                   >
                     Center (100)
@@ -616,7 +754,7 @@ export const ProfilePage: React.FC = () => {
                     type="button"
                     onClick={() => handleSimGazeChange('away')}
                     className={`flex-1 py-1 rounded text-[10px] font-bold transition ${
-                      simGazeState === 'away' ? 'bg-amber-600 text-white shadow-sm' : 'bg-white border text-slate-700'
+                      visionCondition === 'FACE_TURNED_AWAY' ? 'bg-amber-600 text-white shadow-sm' : 'bg-white border text-slate-700'
                     }`}
                   >
                     Gaze Away (-5)
@@ -625,7 +763,7 @@ export const ProfilePage: React.FC = () => {
                     type="button"
                     onClick={() => handleSimGazeChange('absent')}
                     className={`flex-1 py-1 rounded text-[10px] font-bold transition ${
-                      simGazeState === 'absent' ? 'bg-rose-600 text-white shadow-sm' : 'bg-white border text-slate-700'
+                      visionCondition === 'NO_FACE_DETECTED' ? 'bg-rose-600 text-white shadow-sm' : 'bg-white border text-slate-700'
                     }`}
                   >
                     Absent (-10)
@@ -689,12 +827,11 @@ export const ProfilePage: React.FC = () => {
               <button
                 type="button"
                 onClick={handleTestMic}
-                disabled={micTesting}
                 className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition ${
                   micTesting ? 'bg-red-600 text-white animate-pulse' : 'bg-indigo-600 text-white hover:bg-indigo-500'
                 }`}
               >
-                {micTesting ? 'Listening...' : 'Test Mic'}
+                {micTesting ? 'Stop Mic' : 'Test Mic'}
               </button>
             </div>
 
@@ -702,7 +839,31 @@ export const ProfilePage: React.FC = () => {
               Verifies browser speech-to-text recognition for spoken assessments and navigation.
             </p>
 
-            <div className="p-3 bg-white rounded-xl border border-slate-200 min-h-[60px] text-[11px] text-slate-700">
+            {/* Live Audio Level VU Meter */}
+            {micTesting && (
+              <div className="space-y-1 bg-white p-2 rounded-xl border border-slate-200">
+                <div className="flex justify-between text-[10px] text-slate-600 font-semibold">
+                  <span>Live Input Volume:</span>
+                  <span className={micVolumeLevel > 6 ? 'text-emerald-600 font-mono font-bold' : 'text-slate-400 font-mono'}>
+                    {micVolumeLevel > 6 ? `🔊 ${micVolumeLevel}% (Audio Detected!)` : '🔇 0% (Silent / Low Input)'}
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200">
+                  <div
+                    className={`h-full transition-all duration-75 ${
+                      micVolumeLevel > 20
+                        ? 'bg-emerald-500'
+                        : micVolumeLevel > 6
+                        ? 'bg-blue-500'
+                        : 'bg-slate-300'
+                    }`}
+                    style={{ width: `${Math.max(3, micVolumeLevel)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="p-3 bg-white rounded-xl border border-slate-200 min-h-[60px] text-[11px] text-slate-700 leading-relaxed">
               {micHeardText || 'Click "Test Mic" and say something to verify speech recognition.'}
             </div>
           </div>

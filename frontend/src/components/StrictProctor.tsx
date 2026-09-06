@@ -8,6 +8,7 @@ import {
   setSimulatedGaze,
   getSimulatedGaze,
 } from '../utils/cameraManager';
+import { analyzeVideoFrame } from '../utils/visionProctor';
 
 interface StrictProctorProps {
   attemptId: string;
@@ -162,69 +163,52 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
     };
   }, []);
 
+  const [currentGaze, setCurrentGaze] = useState<string>('center');
+
   // Frame analysis loop (~1 FPS)
   useEffect(() => {
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       // 1. Hardware Webcam Mode
       if (hasWebcam && videoRef.current && canvasRef.current) {
         const video = videoRef.current;
         const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-        if (ctx && video.readyState >= 2) {
-          canvas.width = 160;
-          canvas.height = 120;
-          ctx.drawImage(video, 0, 0, 160, 120);
+        if (video.readyState >= 2) {
+          const res = await analyzeVideoFrame(video, canvas);
+          setCurrentGaze(res.gazeDirection);
 
-          const frame = ctx.getImageData(0, 0, 160, 120);
-          const data = frame.data;
-
-          let centerLum = 0;
-          let leftLum = 0;
-          let rightLum = 0;
-
-          for (let i = 0; i < data.length; i += 16) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-            const x = (i / 4) % 160;
-
-            if (x < 50) leftLum += lum;
-            else if (x > 110) rightLum += lum;
-            else centerLum += lum;
-          }
-
-          const isDarkOrCovered = centerLum < 800;
-          const isFaceCentered = centerLum > (leftLum + rightLum) * 0.35;
-
-          if (isDarkOrCovered) {
+          if (res.condition === 'NO_FACE_DETECTED') {
             noFaceDurationRef.current += 1;
+            turnedAwayDurationRef.current = 0;
             if (noFaceDurationRef.current >= 3) {
               setIsNormal(false);
               setStatusMessage('FLAG: No face detected in frame (>3s)');
-              sendProctorSignal('NO_FACE_DETECTED', 'Face disappeared or covered for >3s');
+              sendProctorSignal('NO_FACE_DETECTED', 'Candidate stepped away or camera covered for >3s');
             }
-          } else if (!isFaceCentered) {
+          } else if (res.condition === 'FACE_TURNED_AWAY') {
             turnedAwayDurationRef.current += 1;
+            noFaceDurationRef.current = 0;
             if (turnedAwayDurationRef.current >= 3) {
               setIsNormal(false);
-              setStatusMessage('FLAG: Face significantly turned away (>3s)');
-              sendProctorSignal('FACE_TURNED_AWAY', 'Candidate gaze turned off-center for >3s');
+              setStatusMessage(`FLAG: Head/Gaze turned ${res.gazeDirection} (>3s)`);
+              sendProctorSignal('FACE_TURNED_AWAY', `Candidate head/gaze turned ${res.gazeDirection} for >3s`);
             }
+          } else if (res.condition === 'MULTIPLE_FACES_DETECTED') {
+            setIsNormal(false);
+            setStatusMessage('FLAG: Multiple faces detected in camera');
+            sendProctorSignal('MULTIPLE_FACES_DETECTED', 'Secondary person detected in candidate frame');
           } else {
             noFaceDurationRef.current = 0;
             turnedAwayDurationRef.current = 0;
             setIsNormal(true);
-            setStatusMessage('Normal: 1 Face Detected & Focused');
+            setStatusMessage('Normal: 1 Face Detected & Focused (100% Attentive)');
           }
         }
       }
 
       // 2. Simulated Mode Verification
       if (isSimulatedMode) {
-        setIsNormal(true);
-        setStatusMessage('Simulated: 1 Face Focused (Local Test Feed)');
+        // Handled by handleSimGazeChange
       }
     }, 1000);
 
@@ -338,10 +322,34 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
         {/* Live Camera Status Badge */}
         {(hasWebcam || isSimulatedMode) && (
           <>
-            <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/70 backdrop-blur-sm text-[10px] text-white">
+            <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/70 backdrop-blur-sm text-[10px] text-white z-10">
               <Video className="w-3 h-3 text-red-500 animate-pulse" />
               <span>{hasWebcam ? 'Device Camera (Live)' : 'Simulated Feed'}</span>
             </div>
+
+            {/* Live Face Tracking Target Overlay */}
+            {hasWebcam && (
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                <div
+                  className={`w-32 h-36 border-2 border-dashed rounded-2xl transition-all duration-300 flex flex-col justify-between p-1.5 ${
+                    isNormal
+                      ? 'border-emerald-400/80 bg-emerald-500/5'
+                      : 'border-rose-500 bg-rose-500/15 animate-pulse'
+                  }`}
+                >
+                  <span
+                    className={`text-[8px] font-mono px-1 rounded self-start font-bold ${
+                      isNormal ? 'bg-emerald-950/80 text-emerald-300' : 'bg-rose-950 text-rose-200'
+                    }`}
+                  >
+                    {isNormal ? 'FACE FOCUSED' : 'VIOLATION DETECTED'}
+                  </span>
+                  <span className="text-[8px] bg-black/70 text-slate-300 font-mono px-1 rounded self-end">
+                    GAZE: {currentGaze.toUpperCase()}
+                  </span>
+                </div>
+              </div>
+            )}
 
             <div
               className={`absolute bottom-2 inset-x-2 px-2 py-1 rounded text-[11px] font-medium text-center backdrop-blur-md transition ${
