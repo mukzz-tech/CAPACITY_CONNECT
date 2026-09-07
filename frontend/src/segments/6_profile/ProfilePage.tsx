@@ -26,6 +26,7 @@ import {
   stopAllCameraTracks,
   attachStreamToVideo,
   getVideoDevices,
+  isVirtualCamera,
   setSimulatedGaze,
   getSimulatedGaze,
 } from '../../utils/cameraManager';
@@ -670,10 +671,7 @@ export const ProfilePage: React.FC = () => {
                   <option value="auto">🌟 Auto-Detect (Real Integrated Camera)</option>
                   <option value="simulated">🧑‍💻 OpenCV Live Simulated Face Feed (Proctoring Test Mode)</option>
                   {availableDevices
-                    .filter((d) => {
-                      const lbl = (d.label || '').toLowerCase();
-                      return !lbl.includes('phone') && !lbl.includes('link to windows') && !lbl.includes('12403');
-                    })
+                    .filter((d) => !isVirtualCamera(d.label))
                     .map((d, i) => (
                       <option key={d.deviceId || i} value={d.deviceId}>
                         {`📷 ${d.label || `Physical Camera ${i + 1}`}`}

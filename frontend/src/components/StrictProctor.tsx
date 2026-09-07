@@ -6,6 +6,7 @@ import {
   stopAllCameraTracks,
   attachStreamToVideo,
   getVideoDevices,
+  isVirtualCamera,
   setSimulatedGaze,
   getSimulatedGaze,
 } from '../utils/cameraManager';
@@ -30,7 +31,7 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
   const [selectedCameraMode, setSelectedCameraMode] = useState<string>('auto');
   const [simGazeState, setSimGazeState] = useState<'center' | 'away' | 'absent'>('center');
   const [integrityScore, setIntegrityScore] = useState<number>(100.0);
-  const [statusMessage, setStatusMessage] = useState<string>('Click "Turn On Camera" or choose OpenCV Sim');
+  const [statusMessage, setStatusMessage] = useState<string>('Initializing proctoring camera...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isNormal, setIsNormal] = useState<boolean>(true);
   const [flagCount, setFlagCount] = useState<number>(0);
@@ -40,6 +41,13 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
     getVideoDevices().then((devs) => {
       setAvailableDevices(devs);
     }).catch(console.warn);
+
+    // Auto-start physical camera on mount
+    startCamera();
+
+    return () => {
+      stopAllCameraTracks();
+    };
   }, []);
 
   // Time counters for threshold checking
@@ -125,6 +133,13 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
           : 'Attentiveness verified (1 Face Present)'
       );
       setErrorMessage(null);
+
+      // Refresh devices with newly unlocked labels
+      getVideoDevices()
+        .then((devs) => {
+          setAvailableDevices(devs);
+        })
+        .catch(console.warn);
     } catch (lastErr: any) {
       console.warn('Could not open camera:', lastErr);
       setHasWebcam(false);
@@ -251,10 +266,7 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
           <option value="auto">🌟 Auto-Detect (Real Integrated Camera)</option>
           <option value="simulated">🧑‍💻 OpenCV Live Simulated Feed (Proctoring Test Mode)</option>
           {availableDevices
-            .filter((d) => {
-              const lbl = (d.label || '').toLowerCase();
-              return !lbl.includes('phone') && !lbl.includes('link to windows') && !lbl.includes('12403');
-            })
+            .filter((d) => !isVirtualCamera(d.label))
             .map((d, i) => (
               <option key={d.deviceId || i} value={d.deviceId}>
                 {`📷 ${d.label || `Physical Camera ${i + 1}`}`}

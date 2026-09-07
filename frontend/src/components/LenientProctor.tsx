@@ -20,6 +20,7 @@ import {
   attachStreamToVideo,
   getVideoDevices,
   getSimulatedFaceStream,
+  isVirtualCamera,
 } from '../utils/cameraManager';
 import { analyzeVideoFrame } from '../utils/visionProctor';
 
@@ -78,6 +79,13 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
       }
       setHasWebcam(true);
       setCameraError(null);
+
+      // Refresh devices with newly unlocked labels
+      getVideoDevices()
+        .then((devs) => {
+          setAvailableDevices(devs);
+        })
+        .catch(console.warn);
     } catch (err: any) {
       console.warn('Physical camera unavailable, falling back to OpenCV simulated stream:', err);
       // Seamless fallback so camera NEVER shows inactive!
@@ -260,10 +268,7 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
                 <option value="auto">Default: Auto Physical Webcam</option>
                 <option value="simulated">OpenCV Simulated Face Feed</option>
                 {availableDevices
-                  .filter((d) => {
-                    const lbl = (d.label || '').toLowerCase();
-                    return !lbl.includes('phone') && !lbl.includes('link to windows') && !lbl.includes('12403');
-                  })
+                  .filter((d) => !isVirtualCamera(d.label))
                   .map((d, i) => (
                     <option key={d.deviceId || i} value={d.deviceId}>
                       {`📷 ${d.label || `Physical Camera #${i + 1}`}`}
