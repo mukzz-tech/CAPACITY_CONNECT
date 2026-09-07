@@ -3,8 +3,8 @@ import { Volume2, VolumeX, Pause, Play, Globe, Loader2 } from 'lucide-react';
 
 interface TtsControlProps {
   textToRead: string;
-  currentLang: 'en' | 'hi';
-  onLanguageChange?: (lang: 'en' | 'hi') => void;
+  currentLang: 'en' | 'hi' | 'ta';
+  onLanguageChange?: (lang: 'en' | 'hi' | 'ta') => void;
 }
 
 export const TtsControl: React.FC<TtsControlProps> = ({
@@ -18,7 +18,6 @@ export const TtsControl: React.FC<TtsControlProps> = ({
   const [playbackRate, setPlaybackRate] = useState<number>(1.0);
   const [chunkProgress, setChunkProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
 
-  // References for audio element and chunk queue
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const chunksRef = useRef<string[]>([]);
   const currentIndexRef = useRef<number>(0);
@@ -32,7 +31,7 @@ export const TtsControl: React.FC<TtsControlProps> = ({
       .replace(/\*(.*?)\*/g, '$1')
       .replace(/•\s*/g, '')
       .replace(/`{1,3}(.*?)`{1,3}/g, '$1')
-      .replace(/\$\$(.*?)\$\$/g, 'सूत्र: $1')
+      .replace(/\$\$(.*?)\$\$/g, 'Formula: $1')
       .replace(/\$(.*?)\$/g, '$1')
       .replace(/\[(.*?)\]\(.*?\)/g, '$1')
       .replace(/[><]/g, ' ')
@@ -67,7 +66,6 @@ export const TtsControl: React.FC<TtsControlProps> = ({
     return result.length > 0 ? result : [text.substring(0, 160)];
   };
 
-  // Audio tone generator for instant feedback
   const playChime = (freq = 540) => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -85,7 +83,6 @@ export const TtsControl: React.FC<TtsControlProps> = ({
     } catch (e) {}
   };
 
-  // Stop any active audio or speech synthesis
   const handleStop = () => {
     isCancelledRef.current = true;
     if (audioRef.current) {
@@ -102,7 +99,6 @@ export const TtsControl: React.FC<TtsControlProps> = ({
     setChunkProgress({ current: 0, total: 0 });
   };
 
-  // Play next chunk in sequence using backend TTS audio endpoint
   const playChunkIndex = (index: number) => {
     if (isCancelledRef.current) return;
     const chunks = chunksRef.current;
@@ -130,7 +126,6 @@ export const TtsControl: React.FC<TtsControlProps> = ({
       setIsLoadingAudio(false);
       audio.play().catch((err) => {
         console.warn('Audio play error:', err);
-        // Fallback to Web Speech if audio element blocked
         fallbackWebSpeech(chunk, () => playChunkIndex(index + 1));
       });
     };
@@ -148,7 +143,6 @@ export const TtsControl: React.FC<TtsControlProps> = ({
     };
   };
 
-  // Web Speech synthesis fallback
   const fallbackWebSpeech = (text: string, onDone: () => void) => {
     if (!('speechSynthesis' in window)) {
       onDone();
@@ -156,7 +150,7 @@ export const TtsControl: React.FC<TtsControlProps> = ({
     }
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = playbackRate;
-    utterance.lang = currentLang === 'hi' ? 'hi-IN' : 'en-US';
+    utterance.lang = currentLang === 'hi' ? 'hi-IN' : currentLang === 'ta' ? 'ta-IN' : 'en-US';
 
     const voices = window.speechSynthesis.getVoices();
     if (currentLang === 'hi') {
@@ -167,6 +161,14 @@ export const TtsControl: React.FC<TtsControlProps> = ({
           v.lang.toLowerCase().includes('hi-in')
       );
       if (hiVoice) utterance.voice = hiVoice;
+    } else if (currentLang === 'ta') {
+      const taVoice = voices.find(
+        (v) =>
+          v.lang.toLowerCase().startsWith('ta') ||
+          v.name.toLowerCase().includes('tamil') ||
+          v.lang.toLowerCase().includes('ta-in')
+      );
+      if (taVoice) utterance.voice = taVoice;
     } else {
       const enVoice = voices.find(
         (v) => v.lang.toLowerCase().startsWith('en') || v.name.toLowerCase().includes('english')
@@ -183,7 +185,6 @@ export const TtsControl: React.FC<TtsControlProps> = ({
     playChime(620);
     isCancelledRef.current = false;
 
-    // If currently paused, resume existing audio
     if (isPaused && audioRef.current) {
       audioRef.current.play().then(() => {
         setIsPaused(false);
@@ -217,7 +218,7 @@ export const TtsControl: React.FC<TtsControlProps> = ({
     setIsPlaying(false);
   };
 
-  const handleSwitchLanguage = (lang: 'en' | 'hi') => {
+  const handleSwitchLanguage = (lang: 'en' | 'hi' | 'ta') => {
     handleStop();
     playChime(480);
     if (onLanguageChange) {
@@ -242,12 +243,20 @@ export const TtsControl: React.FC<TtsControlProps> = ({
         <button
           onClick={handlePlay}
           className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold transition shadow-sm"
-          title={currentLang === 'hi' ? 'हिंदी ऑडियो में व्याख्यान सुनें' : 'Read lecture notes aloud'}
+          title={
+            currentLang === 'hi'
+              ? 'हिंदी ऑडियो में व्याख्यान सुनें'
+              : currentLang === 'ta'
+              ? 'பாடக் குறிப்புகளை தமிழில் கேட்கவும்'
+              : 'Read lecture notes aloud'
+          }
         >
           <Volume2 className="w-4 h-4 text-white animate-pulse" />
           <span>
             {isPaused
-              ? 'जारी रखें (Resume)'
+              ? currentLang === 'ta' ? 'தொடரவும் (Resume)' : currentLang === 'hi' ? 'जारी रखें (Resume)' : 'Resume'
+              : currentLang === 'ta'
+              ? 'தமிழில் கேட்க (Listen in Tamil)'
               : currentLang === 'hi'
               ? 'बोलकर सुनें (Listen in Hindi)'
               : 'Listen Aloud (TTS)'}
@@ -256,10 +265,10 @@ export const TtsControl: React.FC<TtsControlProps> = ({
       ) : (
         <button
           onClick={handlePause}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium transition shadow-sm"
+          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium transition shadow-sm"
         >
           <Pause className="w-4 h-4 text-white" />
-          <span>विराम (Pause)</span>
+          <span>{currentLang === 'ta' ? 'நிறுத்து (Pause)' : currentLang === 'hi' ? 'विराम (Pause)' : 'Pause'}</span>
         </button>
       )}
 
@@ -283,7 +292,9 @@ export const TtsControl: React.FC<TtsControlProps> = ({
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
           )}
           <span>
-            {currentLang === 'hi'
+            {currentLang === 'ta'
+              ? `பகுதி ${chunkProgress.current}/${chunkProgress.total} வாசிக்கிறது...`
+              : currentLang === 'hi'
               ? `भाग ${chunkProgress.current}/${chunkProgress.total} बोल रहा है...`
               : `Reading part ${chunkProgress.current}/${chunkProgress.total}...`}
           </span>
@@ -292,7 +303,9 @@ export const TtsControl: React.FC<TtsControlProps> = ({
 
       {/* Speed Selector */}
       <div className="flex items-center gap-1 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700">
-        <span className="text-[11px] text-slate-400">गति:</span>
+        <span className="text-[11px] text-slate-400">
+          {currentLang === 'ta' ? 'வேகம்:' : currentLang === 'hi' ? 'गति:' : 'Speed:'}
+        </span>
         {[0.75, 1.0, 1.25, 1.5].map((rate) => (
           <button
             key={rate}
@@ -313,7 +326,7 @@ export const TtsControl: React.FC<TtsControlProps> = ({
         ))}
       </div>
 
-      {/* Bilingual Language Switcher */}
+      {/* Tri-Lingual Language Switcher (EN / HI / TA) */}
       <div className="flex items-center gap-1 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700">
         <Globe className="w-3.5 h-3.5 text-blue-400" />
         <button
@@ -323,7 +336,7 @@ export const TtsControl: React.FC<TtsControlProps> = ({
               ? 'bg-blue-600 text-white font-bold shadow-sm'
               : 'text-slate-400 hover:text-white'
           }`}
-          title="Translate to English and speak English audio"
+          title="Translate to English"
         >
           EN
         </button>
@@ -334,14 +347,25 @@ export const TtsControl: React.FC<TtsControlProps> = ({
               ? 'bg-blue-600 text-white font-bold shadow-sm'
               : 'text-slate-400 hover:text-white'
           }`}
-          title="Translate to Hindi and speak pure Hindi audio"
+          title="Translate to Hindi"
         >
           हिंदी
+        </button>
+        <button
+          onClick={() => handleSwitchLanguage('ta')}
+          className={`px-2 py-0.5 rounded text-[10px] font-medium transition ${
+            currentLang === 'ta'
+              ? 'bg-blue-600 text-white font-bold shadow-sm'
+              : 'text-slate-400 hover:text-white'
+          }`}
+          title="Translate to Tamil (தமிழ்)"
+        >
+          தமிழ்
         </button>
       </div>
 
       <span className="text-[10px] text-slate-400 hidden md:inline ml-auto font-mono">
-        {currentLang === 'hi' ? '🇮🇳 प्रामाणिक हिंदी उच्चारण' : 'Standard English Voice'}
+        {currentLang === 'ta' ? '🇮🇳 தமிழ் குரல் (Tamil)' : currentLang === 'hi' ? '🇮🇳 प्रामाणिक हिंदी उच्चारण' : 'Standard English Voice'}
       </span>
     </div>
   );

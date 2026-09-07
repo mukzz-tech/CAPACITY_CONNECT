@@ -1,13 +1,13 @@
 import { Router, Response } from 'express';
 import { prisma } from '../prisma.js';
-import { authenticate, requireRole, requireApproved, AuthenticatedRequest } from '../middleware/auth.js';
+import { authenticate, authenticateOptional, requireRole, requireApproved, AuthenticatedRequest } from '../middleware/auth.js';
 import { CompetencyService } from '../services/competencyService.js';
 import { CourseStatus, UserRole } from '../types/index.js';
 
 const router = Router();
 
-// 1. Browse Published Courses (Accessible to all authenticated users)
-router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+// 1. Browse Published Courses (Accessible to all users, optional auth)
+router.get('/', authenticateOptional, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { category, isLongDuration, search } = req.query;
 
@@ -58,7 +58,7 @@ router.get('/recommendations', authenticate, async (req: AuthenticatedRequest, r
 });
 
 // 3. Get Course Details (With prerequisite qualification check for current trainee)
-router.get('/:id', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+router.get('/:id', authenticateOptional, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const courseId = req.params.id;
 

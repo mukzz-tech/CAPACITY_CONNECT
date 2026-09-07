@@ -44,7 +44,7 @@ export const Footer: React.FC = () => {
             </p>
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 text-[11px]">
               <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-              <span>SIH 2026 PS #26075 Compliant</span>
+              <span>WMO-No. 8 & IMD Training Standard</span>
             </div>
           </div>
         </div>

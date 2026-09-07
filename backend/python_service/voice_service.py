@@ -378,6 +378,88 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
 
     phrase = raw_phrase.strip().lower()
 
+    # 0. Help & Language Controls
+    if phrase in ["help", "voice help", "show commands", "what can i say", "commands", "मदद"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "HELP",
+            "open": True,
+            "description": "Voice Help Opened",
+            "tone": 680
+        }
+
+    if phrase in ["close help", "hide help", "minimize help"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "HELP",
+            "open": False,
+            "description": "Voice Help Closed",
+            "tone": 450
+        }
+
+    if phrase in ["switch to hindi", "hindi", "hindi language", "हिन्दी"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "SET_LANGUAGE",
+            "language": "hi-IN",
+            "description": "भाषा: हिन्दी (Hindi)",
+            "tone": 700
+        }
+
+    if phrase in ["switch to english", "english", "english language", "अंग्रेजी"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "SET_LANGUAGE",
+            "language": "en-IN",
+            "description": "Language: English",
+            "tone": 700
+        }
+
+    # 0.1 Hands-Free Page Scrolling
+    if phrase in ["scroll down", "page down", "down", "नीचे जाओ", "नीचे"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "SCROLL",
+            "direction": "down",
+            "description": "Scrolling down...",
+            "tone": 550
+        }
+
+    if phrase in ["scroll up", "page up", "up", "ऊपर जाओ", "ऊपर"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "SCROLL",
+            "direction": "up",
+            "description": "Scrolling up...",
+            "tone": 550
+        }
+
+    if phrase in ["scroll to top", "top", "go to top", "शुरुआत"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "SCROLL",
+            "direction": "top",
+            "description": "Scrolled to top",
+            "tone": 600
+        }
+
+    if phrase in ["scroll to bottom", "bottom", "go to bottom", "अंत"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "SCROLL",
+            "direction": "bottom",
+            "description": "Scrolled to bottom",
+            "tone": 500
+        }
+
     # 1. Courses Navigation
     if (phrase in ["courses", "course", "all courses"] or
         phrase.startswith(("go to course", "open course", "show course", "browse course")) or
@@ -443,7 +525,20 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
             "tone": 620
         }
 
-    # 6. Camera Diagnostics / Proctor Test
+    # 6. Assessments & Exams
+    if (phrase in ["assessment", "assessments", "exam", "exams", "test", "tests", "quiz", "quizzes", "take test", "start test", "parikshe"] or
+        phrase.startswith(("open test", "open assessment", "start exam")) or
+        any(k in phrase for k in ["परीक्षा", "परिक्षा"])):
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "NAVIGATE",
+            "target": "/courses",
+            "description": "Opening Assessments & Courses...",
+            "tone": 620
+        }
+
+    # 6.1 Camera Diagnostics / Proctor Test
     if (phrase in ["camera", "webcam", "test camera", "camera test"] or
         any(k in phrase for k in ["कैमरा"])):
         return {
@@ -476,7 +571,46 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
             "tone": 450
         }
 
-    # 8. Read Aloud Study Notes
+    if phrase in ["speed up", "faster", "2x speed", "fast"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "VIDEO_SPEED",
+            "speed": 1.5,
+            "description": "Speed set to 1.5x",
+            "tone": 650
+        }
+
+    if phrase in ["normal speed", "slow down", "1x speed"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "VIDEO_SPEED",
+            "speed": 1.0,
+            "description": "Speed set to 1.0x",
+            "tone": 550
+        }
+
+    # 7.1 Module Navigation
+    if phrase in ["next module", "next topic", "next lecture", "next lesson"] or any(k in phrase for k in ["अगला टॉपिक", "अगला पाठ"]):
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "MODULE_NEXT",
+            "description": "Next Lecture Topic",
+            "tone": 620
+        }
+
+    if phrase in ["previous module", "previous topic", "previous lecture", "previous lesson"] or any(k in phrase for k in ["पिछला टॉपिक", "पिछला पाठ"]):
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "MODULE_PREV",
+            "description": "Previous Lecture Topic",
+            "tone": 520
+        }
+
+    # 8. Read Aloud Study Notes & Questions
     if (phrase in ["read aloud", "read notes", "listen notes", "read this", "listen to notes", "speak notes"] or
         any(k in phrase for k in ["बोलकर सुनाओ", "पढ़ो", "सुनो"])):
         return {
@@ -484,6 +618,15 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
             "transcript": raw_phrase,
             "action": "READ_ALOUD",
             "description": "Reading study notes aloud...",
+            "tone": 620
+        }
+
+    if phrase in ["read question", "read question aloud", "speak question"] or any(k in phrase for k in ["प्रश्न पढ़ो", "सवाल पढ़ो"]):
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "READ_QUESTION",
+            "description": "Reading Question Aloud...",
             "tone": 620
         }
 
@@ -496,6 +639,65 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
             "action": "STOP",
             "description": "Audio and video stopped",
             "tone": 400
+        }
+
+    # 9.1 Course Filtering & Enrollment
+    if phrase in ["filter long duration", "long term courses", "long duration"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "COURSE_FILTER",
+            "filter": "LONG",
+            "description": "Showing Long-Duration Courses",
+            "tone": 600
+        }
+
+    if phrase in ["filter short duration", "short term courses", "refresher courses"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "COURSE_FILTER",
+            "filter": "SHORT",
+            "description": "Showing Short/Refresher Courses",
+            "tone": 600
+        }
+
+    if phrase in ["all courses", "clear filter", "reset filter"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "COURSE_FILTER",
+            "filter": "ALL",
+            "description": "Showing All Courses",
+            "tone": 600
+        }
+
+    if phrase in ["enroll", "enroll course", "start course", "start study"] or "नामांकन" in phrase:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "ENROLL",
+            "description": "Enrolling in course...",
+            "tone": 680
+        }
+
+    # 9.2 Chatbot AI Actions
+    if phrase in ["send message", "send question", "send chat", "submit question", "भेजो"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "CHATBOT_SEND",
+            "description": "Sending Chatbot Message...",
+            "tone": 680
+        }
+
+    if phrase in ["clear chat", "new chat", "reset chat"]:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "CHATBOT_CLEAR",
+            "description": "Cleared Chat History",
+            "tone": 450
         }
 
     # 10. Assessment Actions
@@ -529,6 +731,19 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
             "tone": 520
         }
 
+    # Jump Question ("question 1", "question 2", "go to question 3")
+    q_jump_match = re.search(r'(?:go to\s+)?(?:question|q|प्रश्न)\s*(\d+)', phrase, re.IGNORECASE)
+    if q_jump_match:
+        q_num = int(q_jump_match.group(1))
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "ASSESSMENT_JUMP",
+            "questionNumber": q_num,
+            "description": f"Jump to Question {q_num}",
+            "tone": 600
+        }
+
     # MCQ Option Selection: "Option A", "Select B", "विकल्प सी", or "A", "B", "C", "D"
     option_match = re.search(r'(?:option|select|choose|answer|विकल्प)\s*([a-d])\b|^([a-d])$', phrase, re.IGNORECASE)
     if option_match:
@@ -540,6 +755,15 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
             "option": opt,
             "description": f"Selected Option {opt}",
             "tone": 650
+        }
+
+    if phrase in ["clear answer", "erase answer", "clear option"] or "उत्तर मिटाओ" in phrase:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "CLEAR_ANSWER",
+            "description": "Cleared Question Answer",
+            "tone": 450
         }
 
     # 11. Clear Active Input Box

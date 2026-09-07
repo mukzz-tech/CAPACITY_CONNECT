@@ -53,13 +53,26 @@ export const CourseBrowsePage: React.FC = () => {
       const phrase = e.detail;
       if (!phrase) return;
       // Skip navigation phrases
-      if (['courses', 'profile', 'home', 'chatbot', 'camera', 'read aloud', 'stop', 'admin', 'trainer'].includes(phrase.toLowerCase().trim())) {
+      if (['courses', 'profile', 'home', 'chatbot', 'camera', 'read aloud', 'stop', 'admin', 'trainer', 'help', 'scroll down', 'scroll up'].includes(phrase.toLowerCase().trim())) {
         return;
       }
       setSearch(phrase);
     };
+
+    const handleVoiceFilter = (e: any) => {
+      const filter = e.detail;
+      if (filter === 'LONG' || filter === 'SHORT' || filter === 'ALL') {
+        setFilterType(filter);
+      }
+    };
+
     window.addEventListener('imd-voice-general', handleVoiceSearch);
-    return () => window.removeEventListener('imd-voice-general', handleVoiceSearch);
+    window.addEventListener('imd-voice-filter', handleVoiceFilter);
+
+    return () => {
+      window.removeEventListener('imd-voice-general', handleVoiceSearch);
+      window.removeEventListener('imd-voice-filter', handleVoiceFilter);
+    };
   }, []);
 
   const filteredCourses = courses.filter((c) => {

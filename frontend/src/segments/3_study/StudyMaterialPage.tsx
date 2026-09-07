@@ -33,37 +33,62 @@ export const StudyMaterialPage: React.FC = () => {
   const [viewMode, setViewMode] = useState<'both' | 'video' | 'notes'>('both');
   const [isVideoPlaying, setIsVideoPlaying] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
-  const [currentLang, setCurrentLang] = useState<'en' | 'hi'>('en');
+  const [currentLang, setCurrentLang] = useState<'en' | 'hi' | 'ta'>('en');
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const getTranslatedContent = (originalText?: string | null) => {
-    if (!originalText) return '';
+    if (!originalText && currentLang === 'en') return '';
+
+    if (currentLang === 'ta') {
+      return `### 1. வளிமண்டல வெப்ப இயக்கவியல் & டாப்ளர் ரேடார் கோட்பாடுகள் (Doppler Dilemma)
+இந்திய வானிலை ஆய்வுத்துறையின் (IMD) நவீன செயல்பாடுகளில் நுண்ணலை கதிர்வீச்சு (Microwave pulses) மூலம் வளிமண்டல இலக்குகளின் (மழைத்துளிகள், பனிக்கட்டிகள், ஆலங்கட்டி மழை) பிரதிபலிப்பு ஆற்றல் துல்லியமாக அளவிடப்படுகிறது.
+
+#### முதன்மை இயற்பியல் சமன்பாடுகள்:
+- அதிகபட்ச தெளிவான தூரம்: $R_{max} = \\frac{c}{2 \\cdot PRF}$
+- அதிகபட்ச தெளிவான திசைவேகம்: $V_{max} = \\frac{\\lambda \\cdot PRF}{4}$
+
+இவ்விரண்டையும் இணைப்பதன் மூலம் கிடைக்கும் அடிப்படை சமன்பாடு **டாப்ளர் சங்கடம் (Doppler Dilemma)** எனப்படுகிறது:
+$$R_{max} \\cdot V_{max} = \\frac{c \\cdot \\lambda}{8}$$
+
+இங்கு $c$ என்பது ஒளியின் வேகம் மற்றும் $\\lambda$ என்பது ரேடார் அலைநீளம் ஆகும். துடிப்பு மறுநிகழ்வு அதிர்வெண்ணை (PRF) அதிகரித்தால் வேகத் துல்லியம் அதிகரிக்கும், ஆனால் தூர வரம்பு குறையும்.
+
+### 2. அடிப்படை பிரதிபலிப்பு காரணி (Base Reflectivity - dBZ)
+மழைப்பொழிவின் தீவிரத்தை dBZ அலகில் அளவிடப்படுகிறது:
+- **15 முதல் 30 dBZ**: லேசான தூறல் அல்லது அடர்ந்த மேகங்கள்
+- **30 முதல் 45 dBZ**: மிதமானது முதல் கனமழைப்பொழிவு (Monsoon showers)
+- **> 50 dBZ**: தீவிர இடியுடன் கூடிய புயல் மேகங்கள், மின்னல் அபாயம்
+- **> 65 dBZ**: கடுமையான ஆலங்கட்டி மழை (Hailstorm) ஏற்படுவதற்கான அதிகபட்ச சாத்தியக்கூறு
+
+### 3. செயல்பாட்டு முன்னறிவிப்பு முக்கியத்துவம்:
+டாப்ளர் வானிலை ரேடார் சுழலும் சூறாவளி மேகங்கள், பலத்த காற்று மற்றும் தீவிர புயல்களை 3 மணி நேரத்திற்கு முன்பே துல்லியமாக கண்டறிந்து உடனடி எச்சரிக்கை (Nowcasting) விடுக்க உதவுகிறது.`;
+    }
+
     if (currentLang === 'hi') {
       return `### 1. डॉप्लर दुविधा (Doppler Dilemma)
 डॉप्लर मौसम रडार सूक्ष्मतरंग विकिरण (microwave pulses) उत्सर्जित करके वायुमंडलीय लक्ष्यों (जैसे वर्षा की बूंदें, बर्फ के कण और ओले) से परावर्तित ऊर्जा का विश्लेषण करता है।
 
 #### प्रमुख सूत्र:
-- अधिकतम असंदिग्ध दूरी: R_max = c / (2 · PRF)
-- अधिकतम असंदिग्ध वेग: V_max = (λ · PRF) / 4
+- अधिकतम असंदिग्ध दूरी: $R_{max} = \\frac{c}{2 \\cdot PRF}$
+- अधिकतम असंदिग्ध वेग: $V_{max} = \\frac{\\lambda \\cdot PRF}{4}$
 
 इन दोनों को संयोजित करने पर मूलभूत नियम प्रकट होता है जिसे **डॉप्लर दुविधा** कहा जाता है:
 $$R_{max} \\cdot V_{max} = \\frac{c \\cdot \\lambda}{8}$$
 
-जहाँ c प्रकाश की चाल है तथा λ रडार तरंगदैर्घ्य है। पल्स पुनरावृत्ति आवृत्ति (PRF) बढ़ाने से वेग सटीकता बढ़ती है किंतु दूरी सीमा घट जाती है।
+जहाँ $c$ प्रकाश की चाल है तथा $\\lambda$ रडार तरंगदैर्घ्य है। पल्स पुनरावृत्ति आवृत्ति (PRF) बढ़ाने से वेग सटीकता बढ़ती है किंतु दूरी सीमा घट जाती है।
 
 ### 2. आधार परावर्तकता घटक (Base Reflectivity - dBZ)
 परावर्तकता रडार तक वापस आने वाली ऊर्जा की मात्रा को मापती है:
-- 15 से 30 dBZ: हल्की वर्षा अथवा घने बादल
-- 30 से 45 dBZ: मध्यम से तीव्र मानसूनी बौछारें
-- > 50 dBZ: गंभीर तूफानी बादल एवं तीव्र आकाशीय बिजली
-- > 65 dBZ: विनाशकारी ओलावृष्टि (Hailstorm) की प्रबल संभावना
+- **15 से 30 dBZ**: हल्की वर्षा अथवा घने बादल
+- **30 से 45 dBZ**: मध्यम से तीव्र मानसूनी बौछारें
+- **> 50 dBZ**: गंभीर तूफानी बादल एवं तीव्र आकाशीय बिजली
+- **> 65 dBZ**: विनाशकारी ओलावृष्टि (Hailstorm) की प्रबल संभावना
 
 ### 3. मुख्य परिचालन निष्कर्ष:
-डॉप्लर मौसम रडार वायुमंडल में चक्रवात, भारी वर्षा और ओलावृष्टि की सटीक पूर्व चेतावनी देने में सक्षम है। जब वर्षा की बूंदें रडार की ओर आती हैं तो आवृत्ति बढ़ती है, और जब दूर जाती हैं तो घटती है। इस सिद्धांत से आंधी-तूफान की समयपूर्व चेतावनी जारी की जाती है।`;
+डॉप्लर मौसम रडार वायुमंडल में चक्रवात, भारी वर्षा और ओलावृष्टि की सटीक पूर्व चेतावनी (Nowcasting) देने में सक्षम है।`;
     }
 
-    return `### 1. Doppler Dilemma
-The Doppler radar operates by emitting pulses of microwave radiation and listening for the backscattered energy from atmospheric targets (hydrometeors such as raindrops, snowflakes, and hailstones).
+    return originalText || `### 1. Atmospheric Thermodynamics & Doppler Radar Principles
+The India Meteorological Department (IMD) operates modern Doppler Weather Radars by emitting pulses of microwave radiation and listening for the backscattered energy from atmospheric hydrometeors (raindrops, snowflakes, and hailstones).
 
 #### Key Formulas:
 - Maximum Unambiguous Range: $R_{max} = \\frac{c}{2 \\cdot PRF}$
@@ -74,15 +99,15 @@ $$R_{max} \\cdot V_{max} = \\frac{c \\cdot \\lambda}{8}$$
 
 Where $c$ is the speed of light and $\\lambda$ is the radar transmitter wavelength. Increasing the pulse repetition frequency (PRF) enhances velocity resolution but decreases range resolution, and vice versa.
 
-### 2. Base Reflectivity Factor (Z)
-Reflectivity measures the amount of power backscattered to the radar. It is calculated in dBZ (decibels relative to Z):
-- 15 - 30 dBZ: Light stratiform rain or dense clouds
-- 30 - 45 dBZ: Moderate to heavy showers
-- > 50 dBZ: Severe convective storm, intense lightning
-- > 65 dBZ: High probability of damaging hail
+### 2. Base Reflectivity Factor (dBZ)
+Reflectivity measures the amount of power backscattered to the radar. It is calculated in dBZ:
+- **15 - 30 dBZ**: Light stratiform rain or dense clouds
+- **30 - 45 dBZ**: Moderate to heavy monsoon showers
+- **> 50 dBZ**: Severe convective storm, intense lightning
+- **> 65 dBZ**: High probability of damaging hail
 
 ### 3. Operational Forecasting Significance:
-Doppler Weather Radar enables severe weather nowcasting across all IMD coastal and inland stations. Analyzing Base Reflectivity alongside Radial Velocity allows forecasters to detect rotating supercells and squall lines up to 3 hours before thunderstorm touchdown.`;
+Doppler Weather Radar enables severe weather nowcasting across all IMD coastal and inland stations, detecting rotating supercells and squall lines up to 3 hours before thunderstorm touchdown.`;
   };
 
   // Sync lesson modules into video and notes slots
@@ -150,7 +175,18 @@ Doppler Weather Radar enables severe weather nowcasting across all IMD coastal a
     loadCourse();
   }, [id]);
 
-  // Voice Event Listeners: Play Video, Pause Video, Read Aloud Notes
+  const courseStateRef = useRef<any>(null);
+  const selectedLessonStateRef = useRef<any>(null);
+
+  useEffect(() => {
+    courseStateRef.current = course;
+  }, [course]);
+
+  useEffect(() => {
+    selectedLessonStateRef.current = selectedLesson;
+  }, [selectedLesson]);
+
+  // Voice Event Listeners: Play Video, Pause Video, Speed, Next/Prev Topic, Read Aloud Notes
   useEffect(() => {
     const handleVoicePlayVideo = () => {
       if (videoRef.current) {
@@ -165,14 +201,57 @@ Doppler Weather Radar enables severe weather nowcasting across all IMD coastal a
       }
     };
 
+    const handleVoiceSpeed = (e: any) => {
+      const speed = typeof e.detail === 'number' ? e.detail : 1.0;
+      if (videoRef.current) {
+        videoRef.current.playbackRate = speed;
+      }
+    };
+
+    const handleNextTopic = () => {
+      const currentCourse = courseStateRef.current;
+      const currentLesson = selectedLessonStateRef.current;
+      if (!currentCourse || !currentCourse.lessons || currentCourse.lessons.length === 0) return;
+      const idx = currentCourse.lessons.findIndex((l: any) => l.id === currentLesson?.id);
+      if (idx !== -1 && idx < currentCourse.lessons.length - 1) {
+        const nextLesson = currentCourse.lessons[idx + 1];
+        setSelectedLesson(nextLesson);
+        if (nextLesson.modules && nextLesson.modules.length > 0) {
+          setSelectedModule(nextLesson.modules[0]);
+        }
+        syncLessonModules(nextLesson);
+      }
+    };
+
+    const handlePrevTopic = () => {
+      const currentCourse = courseStateRef.current;
+      const currentLesson = selectedLessonStateRef.current;
+      if (!currentCourse || !currentCourse.lessons || currentCourse.lessons.length === 0) return;
+      const idx = currentCourse.lessons.findIndex((l: any) => l.id === currentLesson?.id);
+      if (idx > 0) {
+        const prevLesson = currentCourse.lessons[idx - 1];
+        setSelectedLesson(prevLesson);
+        if (prevLesson.modules && prevLesson.modules.length > 0) {
+          setSelectedModule(prevLesson.modules[0]);
+        }
+        syncLessonModules(prevLesson);
+      }
+    };
+
     window.addEventListener('imd-voice-video-play', handleVoicePlayVideo);
     window.addEventListener('imd-voice-video-pause', handleVoicePauseVideo);
     window.addEventListener('imd-voice-stop', handleVoicePauseVideo);
+    window.addEventListener('imd-voice-speed', handleVoiceSpeed);
+    window.addEventListener('imd-voice-next-module', handleNextTopic);
+    window.addEventListener('imd-voice-prev-module', handlePrevTopic);
 
     return () => {
       window.removeEventListener('imd-voice-video-play', handleVoicePlayVideo);
       window.removeEventListener('imd-voice-video-pause', handleVoicePauseVideo);
       window.removeEventListener('imd-voice-stop', handleVoicePauseVideo);
+      window.removeEventListener('imd-voice-speed', handleVoiceSpeed);
+      window.removeEventListener('imd-voice-next-module', handleNextTopic);
+      window.removeEventListener('imd-voice-prev-module', handlePrevTopic);
     };
   }, []);
 
@@ -329,7 +408,7 @@ Doppler Weather Radar enables severe weather nowcasting across all IMD coastal a
                     Interactive Meteorological Study
                   </span>
                   <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-slate-100 text-slate-700">
-                    {currentLang === 'hi' ? 'हिंदी (Hindi)' : 'English (EN)'}
+                    {currentLang === 'ta' ? 'தமிழ் (Tamil)' : currentLang === 'hi' ? 'हिंदी (Hindi)' : 'English (EN)'}
                   </span>
                 </div>
                 <h2 className="text-xl font-bold text-slate-900">

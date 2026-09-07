@@ -70,30 +70,9 @@ export const App: React.FC = () => {
                 <Route path="/courses/:id" element={<CourseDetailPage />} />
 
                 {/* 3. Study Material Segment */}
-                <Route
-                  path="/courses/:id/study"
-                  element={
-                    <ProtectedRoute>
-                      <StudyMaterialPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/study/:id"
-                  element={
-                    <ProtectedRoute>
-                      <StudyMaterialPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/study"
-                  element={
-                    <ProtectedRoute>
-                      <StudyMaterialPage />
-                    </ProtectedRoute>
-                  }
-                />
+                <Route path="/courses/:id/study" element={<StudyMaterialPage />} />
+                <Route path="/study/:id" element={<StudyMaterialPage />} />
+                <Route path="/study" element={<StudyMaterialPage />} />
 
                 {/* 4. Assessments Segment */}
                 <Route
@@ -106,14 +85,7 @@ export const App: React.FC = () => {
                 />
 
                 {/* 5. Chatbot Segment */}
-                <Route
-                  path="/chatbot"
-                  element={
-                    <ProtectedRoute>
-                      <ChatbotPage />
-                    </ProtectedRoute>
-                  }
-                />
+                <Route path="/chatbot" element={<ChatbotPage />} />
 
                 {/* 6. Profile Segment */}
                 <Route

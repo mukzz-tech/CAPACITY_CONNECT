@@ -28,16 +28,16 @@ export interface VoiceContextType {
 
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 
-// Auto-fill active or first visible editable input/textarea on the screen
-export const fillActiveInput = (text: string): boolean => {
+// Auto-fill active editable input/textarea ONLY if user is currently focused on it
+export const fillActiveInput = (text: string, forceTarget = false): boolean => {
   try {
-    let el = document.activeElement as HTMLElement | null;
+    const el = document.activeElement as HTMLElement | null;
 
     const isEditable = (node: Element | null): node is HTMLInputElement | HTMLTextAreaElement => {
       if (!node) return false;
       if (node instanceof HTMLInputElement) {
         return (
-          ['text', 'search', 'email', 'url', 'password', 'tel', 'number', ''].includes(node.type) &&
+          ['text', 'search', 'email', 'url', 'tel', 'number', ''].includes(node.type) &&
           !node.disabled &&
           !node.readOnly
         );
@@ -48,26 +48,16 @@ export const fillActiveInput = (text: string): boolean => {
       return false;
     };
 
-    // If activeElement is body or not an editable field, auto-detect the best visible input on screen
+    // Only fill if an input is explicitly focused, or if forceTarget was explicitly requested
     if (!isEditable(el)) {
-      const candidates = Array.from(
-        document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
-          'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])'
-        )
+      if (!forceTarget) return false;
+      const firstInput = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+        'input[type="text"]:not([disabled]):not([readonly]), input[type="search"]:not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])'
       );
-      el =
-        candidates.find((input) => {
-          const rect = input.getBoundingClientRect();
-          return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
-        }) || null;
+      if (!firstInput) return false;
+      firstInput.focus();
+      return fillActiveInput(text, false);
     }
-
-    if (!isEditable(el)) return false;
-
-    // Focus and highlight target input
-    try {
-      el.focus();
-    } catch {}
 
     const prototype =
       el instanceof HTMLInputElement
@@ -199,7 +189,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
           const voices = window.speechSynthesis.getVoices();
           const matched = voices.find((v) =>
-            lang.startsWith('hi')
+            lang.startsWith('ta')
+              ? v.lang.toLowerCase().includes('ta') || v.name.toLowerCase().includes('tamil')
+              : lang.startsWith('hi')
               ? v.lang.toLowerCase().includes('hi') || v.name.toLowerCase().includes('hindi')
               : v.lang.toLowerCase().includes('en')
           );
@@ -317,9 +309,87 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (cmd.tone) playTone(cmd.tone, 0.12);
 
+    if (cmd.action === 'VOICE_ON') {
+      setIsVoiceActive(true);
+      isVoiceActiveRef.current = true;
+      try { localStorage.setItem('imd_voice_active', 'true'); } catch {}
+      playTone(520, 0.1);
+      setTimeout(() => playTone(780, 0.15), 120);
+      setLastActionStatus('🎙️ Voice Active — Speak any page to navigate');
+      speakText('Voice active. Speak any page to navigate.');
+      startNewListeningSession();
+      setTimeout(() => {
+        setLastRecognizedPhrase('');
+        setLastActionStatus('');
+      }, 2500);
+      return true;
+    }
+
+    if (cmd.action === 'VOICE_OFF') {
+      setIsVoiceActive(false);
+      isVoiceActiveRef.current = false;
+      try { localStorage.setItem('imd_voice_active', 'false'); } catch {}
+      playTone(320, 0.15);
+      setLastRecognizedPhrase('');
+      setLastActionStatus('');
+      speakText('Voice deactivated');
+      stopActiveSession();
+      return true;
+    }
+
     if (cmd.action === 'NAVIGATE' && cmd.target) {
+      console.log('[Voice Navigation Triggered]: Target ->', cmd.target);
       setLastActionStatus(cmd.description || `Navigating to ${cmd.target}...`);
-      navigate(cmd.target);
+      playTone(620, 0.1);
+      try {
+        navigate(cmd.target);
+      } catch {
+        window.location.pathname = cmd.target;
+      }
+      window.dispatchEvent(new CustomEvent('imd-voice-navigate', { detail: cmd.target }));
+      // Auto-disappear speech display after smooth navigation (1.2s)
+      setTimeout(() => {
+        setLastRecognizedPhrase('');
+        setLastActionStatus('');
+      }, 1200);
+      return true;
+    }
+
+    if (cmd.action === 'SCROLL') {
+      const dir = cmd.direction || 'down';
+      setLastActionStatus(cmd.description || `Scrolling ${dir}...`);
+      if (dir === 'top') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else if (dir === 'bottom') {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      } else if (dir === 'up') {
+        window.scrollBy({ top: -window.innerHeight * 0.7, behavior: 'smooth' });
+      } else {
+        window.scrollBy({ top: window.innerHeight * 0.7, behavior: 'smooth' });
+      }
+      return true;
+    }
+
+    if (cmd.action === 'HELP') {
+      const open = cmd.open !== false;
+      setLastActionStatus(cmd.description || (open ? 'Voice Help Opened' : 'Voice Help Closed'));
+      window.dispatchEvent(new CustomEvent('imd-voice-help', { detail: { open } }));
+      if (open) {
+        speakText('Voice commands active. Say: courses, profile, home, study, or chatbot to navigate.');
+      }
+      return true;
+    }
+
+    if (cmd.action === 'SET_LANGUAGE') {
+      const lang = cmd.language || 'en-IN';
+      setLanguage(lang);
+      const isHi = lang.startsWith('hi');
+      const isTa = lang.startsWith('ta');
+      setLastActionStatus(isTa ? 'மொழி: தமிழ் (Tamil)' : isHi ? 'भाषा: हिन्दी (Hindi)' : 'Language: English');
+      speakText(
+        isTa ? 'தமிழ் குரல் வழிசெலுத்தல் செயல்படுத்தப்பட்டது' : isHi ? 'हिन्दी भाषा सक्रिय है' : 'English voice navigation activated',
+        isTa ? 'ta-IN' : isHi ? 'hi-IN' : 'en-IN'
+      );
       return true;
     }
 
@@ -342,9 +412,34 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return true;
     }
 
+    if (cmd.action === 'VIDEO_SPEED') {
+      const speed = cmd.speed || 1.0;
+      setLastActionStatus(cmd.description || `Video speed set to ${speed}x`);
+      window.dispatchEvent(new CustomEvent('imd-voice-speed', { detail: speed }));
+      return true;
+    }
+
+    if (cmd.action === 'MODULE_NEXT') {
+      setLastActionStatus(cmd.description || 'Next Lecture Topic');
+      window.dispatchEvent(new CustomEvent('imd-voice-next-module'));
+      return true;
+    }
+
+    if (cmd.action === 'MODULE_PREV') {
+      setLastActionStatus(cmd.description || 'Previous Lecture Topic');
+      window.dispatchEvent(new CustomEvent('imd-voice-prev-module'));
+      return true;
+    }
+
     if (cmd.action === 'READ_ALOUD') {
       setLastActionStatus(cmd.description || 'Reading notes aloud...');
       window.dispatchEvent(new CustomEvent('imd-voice-read-aloud'));
+      return true;
+    }
+
+    if (cmd.action === 'READ_QUESTION') {
+      setLastActionStatus(cmd.description || 'Reading question aloud...');
+      window.dispatchEvent(new CustomEvent('imd-voice-read-question'));
       return true;
     }
 
@@ -374,27 +469,64 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return true;
     }
 
+    if (cmd.action === 'ASSESSMENT_JUMP') {
+      const qNum = cmd.questionNumber || 1;
+      setLastActionStatus(cmd.description || `Jump to Question ${qNum}`);
+      window.dispatchEvent(new CustomEvent('imd-voice-jump-question', { detail: qNum }));
+      return true;
+    }
+
     if (cmd.action === 'OPTION_SELECT' && cmd.option) {
       setLastActionStatus(cmd.description || `Selected Option ${cmd.option}`);
       window.dispatchEvent(new CustomEvent('imd-voice-option-select', { detail: cmd.option }));
       return true;
     }
 
+    if (cmd.action === 'CLEAR_ANSWER') {
+      setLastActionStatus(cmd.description || 'Cleared Question Answer');
+      window.dispatchEvent(new CustomEvent('imd-voice-clear-answer'));
+      return true;
+    }
+
+    if (cmd.action === 'CHATBOT_SEND') {
+      setLastActionStatus(cmd.description || 'Sending AI Chat message...');
+      window.dispatchEvent(new CustomEvent('imd-voice-send-message'));
+      return true;
+    }
+
+    if (cmd.action === 'CHATBOT_CLEAR') {
+      setLastActionStatus(cmd.description || 'Cleared Chat History');
+      window.dispatchEvent(new CustomEvent('imd-voice-clear-chat'));
+      return true;
+    }
+
+    if (cmd.action === 'COURSE_FILTER') {
+      setLastActionStatus(cmd.description || `Course Filter: ${cmd.filter}`);
+      window.dispatchEvent(new CustomEvent('imd-voice-filter', { detail: cmd.filter }));
+      return true;
+    }
+
+    if (cmd.action === 'ENROLL') {
+      setLastActionStatus(cmd.description || 'Enrolling in course...');
+      window.dispatchEvent(new CustomEvent('imd-voice-enroll'));
+      return true;
+    }
+
     if (cmd.action === 'CLEAR_INPUT') {
-      fillActiveInput('');
+      fillActiveInput('', true);
       setLastActionStatus(cmd.description || 'Cleared Input Box');
       return true;
     }
 
     if (cmd.action === 'FILL_INPUT' && cmd.fill_text !== undefined) {
-      const filled = fillActiveInput(cmd.fill_text);
+      const filled = fillActiveInput(cmd.fill_text, true);
       setLastActionStatus(cmd.description || `Filled box: "${cmd.fill_text}"`);
       window.dispatchEvent(new CustomEvent('imd-voice-general', { detail: cmd.fill_text }));
       return filled;
     }
 
     if (cmd.action === 'GENERAL_INPUT' && cmd.fill_text) {
-      const filled = fillActiveInput(cmd.fill_text);
+      const filled = fillActiveInput(cmd.fill_text, false);
       if (filled) {
         setLastActionStatus(`Filled box: "${cmd.fill_text}"`);
       } else {
@@ -499,7 +631,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setLastActionStatus('🎙️ Listening... Speak now!');
 
     try {
-      // 1. Primary: High-fidelity 16kHz PCM WAV capture via browser Web Audio API
       const session = await startWavRecording({
         onLevel: (lvl) => setAudioLevel(lvl),
       });
@@ -520,7 +651,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return result;
     } catch (err: any) {
       console.warn('[Voice Capture] Browser audio capture unavailable, falling back to Python hardware mic:', err.message);
-      // 2. Secondary fallback: Direct hardware microphone capture in Python
       const directRes = await listenWithPythonHardwareMic();
       resumeListening();
       return directRes;
@@ -529,248 +659,470 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Core Command & Box-Filling Router
   const processVoiceCommand = (rawPhrase: string): boolean => {
-    const phrase = rawPhrase.trim().toLowerCase();
-    if (!phrase) return false;
+    if (!rawPhrase || !rawPhrase.trim()) return false;
 
-    const now = Date.now();
-    if (now - lastCmdTimeRef.current < 600) {
-      return false; // Debounce
-    }
+    // Clean punctuation
+    const clean = rawPhrase
+      .toLowerCase()
+      .replace(/[.,!?;:'"()[\]{}]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-    console.log('[Voice Command Engine]:', phrase);
+    if (!clean) return false;
+
+    // Stripped of conversational prefixes/suffixes
+    const stripped = clean
+      .replace(/^(go to|navigate to|navigate|open|show|take me to|take me|switch to|move to|load|visit|head to|view|display|please open|please go to|please navigate to|jump to|i want to see|i want to go to|i want to open|kholo|jao)\s+/i, '')
+      .replace(/\s+(kholo|jao|dikhao|par jao|hogu|ge hogu|torsu|nodu|open maadu|maadu|page|screen|section|tab|view|portal)$/i, '')
+      .trim();
+
+    console.log('[Voice Engine Phrase Process]: Raw:', rawPhrase, '| Clean:', clean, '| Stripped:', stripped);
     setLastRecognizedPhrase(rawPhrase.trim());
 
-    // 1. Courses Navigation
-    if (
-      phrase === 'courses' ||
-      phrase === 'course' ||
-      phrase.startsWith('go to course') ||
-      phrase.startsWith('open course') ||
-      phrase.startsWith('show course') ||
-      phrase.includes('syllabus') ||
-      phrase.includes('catalogue') ||
-      phrase.includes('पाठ्यक्रम') ||
-      phrase.includes('कोर्स')
-    ) {
-      lastCmdTimeRef.current = now;
-      playTone(620, 0.1);
-      setLastActionStatus('Navigating to Courses...');
-      navigate('/courses');
-      return true;
+    // 0. Voice Wake-Word Activation & Deactivation (Hands-free control)
+    const isWakeOn =
+      clean === 'voice command on' ||
+      clean === 'voice comment on' ||
+      clean === 'voice comments on' ||
+      clean === 'voice cmt on' ||
+      clean === 'voice on' ||
+      clean === 'start voice' ||
+      clean === 'activate voice' ||
+      clean === 'turn on voice' ||
+      clean === 'open voice' ||
+      clean === 'voice start' ||
+      clean.includes('वॉयस ऑन') ||
+      clean.includes('वॉयस कमांड ऑन') ||
+      clean.includes('वॉइस ऑन');
+
+    if (isWakeOn) {
+      return executeParsedCommand({ action: 'VOICE_ON' });
     }
 
-    // 2. Profile & Certificates Navigation
-    if (
-      phrase === 'profile' ||
-      phrase === 'my profile' ||
-      phrase === 'certificates' ||
-      phrase === 'certificate' ||
-      phrase.startsWith('open profile') ||
-      phrase.startsWith('go to profile') ||
-      phrase.includes('account') ||
-      phrase.includes('scores') ||
-      phrase.includes('प्रमाणपत्र') ||
-      phrase.includes('प्रोफ़ाइल')
-    ) {
-      lastCmdTimeRef.current = now;
-      playTone(620, 0.1);
-      setLastActionStatus('Opening Profile & Certificates...');
-      navigate('/profile');
-      return true;
+    const isWakeOff =
+      clean === 'voice command off' ||
+      clean === 'voice comment off' ||
+      clean === 'voice comments off' ||
+      clean === 'voice cmt off' ||
+      clean === 'voice off' ||
+      clean === 'stop voice' ||
+      clean === 'deactivate voice' ||
+      clean === 'turn off voice' ||
+      clean === 'mute voice' ||
+      clean === 'stop listening' ||
+      clean.includes('वॉयस बंद') ||
+      clean.includes('आवाज़ बंद') ||
+      clean.includes('वॉइस बंद');
+
+    if (isWakeOff) {
+      return executeParsedCommand({ action: 'VOICE_OFF' });
     }
 
-    // 3. Homepage / Dashboard
-    if (
-      phrase === 'home' ||
-      phrase === 'homepage' ||
-      phrase === 'dashboard' ||
-      phrase.startsWith('go home') ||
-      phrase.startsWith('go to home') ||
-      phrase.includes('main page') ||
-      phrase.includes('होम') ||
-      phrase.includes('डैशबोर्ड')
-    ) {
-      lastCmdTimeRef.current = now;
-      playTone(620, 0.1);
-      setLastActionStatus('Navigating to Homepage...');
-      navigate('/');
-      return true;
+    // 0.1 Hands-Free Page Scrolling
+    if (clean === 'scroll down' || clean === 'page down' || clean === 'down' || clean.includes('नीचे')) {
+      return executeParsedCommand({ action: 'SCROLL', direction: 'down', description: 'Scrolling down...' });
     }
 
-    // 4. Chatbot / AI Assistant
-    if (
-      phrase === 'chatbot' ||
-      phrase === 'chat' ||
-      phrase === 'assistant' ||
-      phrase.startsWith('open chatbot') ||
-      phrase.startsWith('open chat') ||
-      phrase.includes('ai assistant') ||
-      phrase.includes('चैटबॉट') ||
-      phrase.includes('सहायक')
-    ) {
-      lastCmdTimeRef.current = now;
-      playTone(620, 0.1);
-      setLastActionStatus('Opening Meteorological Assistant...');
-      navigate('/chatbot');
-      return true;
+    if (clean === 'scroll up' || clean === 'page up' || clean === 'up' || clean.includes('ऊपर')) {
+      return executeParsedCommand({ action: 'SCROLL', direction: 'up', description: 'Scrolling up...' });
     }
 
-    // 5. Login
-    if (
-      phrase === 'login' ||
-      phrase === 'log in' ||
-      phrase === 'sign in' ||
-      phrase.startsWith('open login') ||
-      phrase.includes('लॉगिन')
-    ) {
-      lastCmdTimeRef.current = now;
-      playTone(620, 0.1);
-      setLastActionStatus('Opening Login Page...');
-      navigate('/login');
-      return true;
+    if (clean === 'scroll to top' || clean === 'top' || clean === 'go to top' || clean.includes('शुरुआत')) {
+      return executeParsedCommand({ action: 'SCROLL', direction: 'top', description: 'Scrolled to top' });
     }
 
-    // 6. Signup
-    if (
-      phrase === 'signup' ||
-      phrase === 'sign up' ||
-      phrase === 'register' ||
-      phrase.startsWith('open signup') ||
-      phrase.includes('पंजीकरण')
-    ) {
-      lastCmdTimeRef.current = now;
-      playTone(620, 0.1);
-      setLastActionStatus('Opening Registration...');
-      navigate('/signup');
-      return true;
+    if (clean === 'scroll to bottom' || clean === 'bottom' || clean === 'go to bottom' || clean.includes('अंत')) {
+      return executeParsedCommand({ action: 'SCROLL', direction: 'bottom', description: 'Scrolled to bottom' });
     }
 
-    // 7. Trainer Studio
-    if (
-      phrase === 'trainer' ||
-      phrase === 'trainer studio' ||
-      phrase.startsWith('open trainer') ||
-      phrase.includes('प्रशिक्षक')
-    ) {
-      lastCmdTimeRef.current = now;
-      playTone(620, 0.1);
-      setLastActionStatus('Opening Trainer Studio...');
-      navigate('/trainer');
-      return true;
+    // 0.2 Language Switching Commands
+    if (clean === 'switch to tamil' || clean === 'tamil' || clean === 'tamil language' || clean === 'தமிழ்' || clean.includes('தமிழ் மொழி')) {
+      return executeParsedCommand({ action: 'SET_LANGUAGE', language: 'ta-IN' });
     }
 
-    // 8. Admin Console
-    if (
-      phrase === 'admin' ||
-      phrase === 'admin console' ||
-      phrase.startsWith('open admin') ||
-      phrase.includes('व्यवस्थापक') ||
-      phrase.includes('एडमिन')
-    ) {
-      lastCmdTimeRef.current = now;
-      playTone(620, 0.1);
-      setLastActionStatus('Opening Admin Console...');
-      navigate('/admin');
-      return true;
+    if (clean === 'switch to hindi' || clean === 'hindi' || clean === 'hindi language' || clean === 'हिन्दी' || clean === 'हिंदी' || clean.includes('हिंदी')) {
+      return executeParsedCommand({ action: 'SET_LANGUAGE', language: 'hi-IN' });
     }
 
-    // 9. Camera Diagnostics
-    if (
-      phrase === 'camera' ||
-      phrase === 'webcam' ||
-      phrase === 'test camera' ||
-      phrase.includes('कैमरा')
-    ) {
-      lastCmdTimeRef.current = now;
-      playTone(620, 0.1);
-      setLastActionStatus('Opening Camera Diagnostics...');
-      navigate('/profile');
-      window.dispatchEvent(new CustomEvent('imd-voice-test-camera'));
-      return true;
+    if (clean === 'switch to english' || clean === 'english' || clean === 'english language' || clean === 'ஆங்கிலம்' || clean === 'अंग्रेजी') {
+      return executeParsedCommand({ action: 'SET_LANGUAGE', language: 'en-IN' });
     }
 
-    // 10. Study Material Navigation
+    // 1. Courses Navigation (/courses)
     if (
-      phrase === 'study' ||
-      phrase === 'study material' ||
-      phrase === 'open study' ||
-      phrase === 'lectures' ||
-      phrase.startsWith('go to study') ||
-      phrase.includes('अध्ययन')
+      stripped === 'courses' ||
+      stripped === 'course' ||
+      stripped === 'all courses' ||
+      stripped === 'browse courses' ||
+      stripped === 'view courses' ||
+      stripped === 'syllabus' ||
+      stripped === 'catalog' ||
+      stripped === 'catalogue' ||
+      stripped === 'classes' ||
+      stripped === 'subjects' ||
+      stripped === 'coursework' ||
+      stripped === 'பாடங்கள்' ||
+      stripped === 'பாடம்' ||
+      stripped === 'படிப்புகள்' ||
+      clean.includes('course') ||
+      clean.includes('syllabus') ||
+      clean.includes('catalogue') ||
+      clean.includes('पाठ्यक्रम') ||
+      clean.includes('कोर्स') ||
+      clean.includes('பாடம்') ||
+      clean.includes('படிப்பு')
     ) {
-      lastCmdTimeRef.current = now;
-      playTone(620, 0.1);
-      setLastActionStatus('Opening Study Material...');
-      navigate('/study');
-      return true;
+      return executeParsedCommand({
+        action: 'NAVIGATE',
+        target: '/courses',
+        description: 'Navigating to Courses...',
+        tone: 620,
+      });
     }
 
-    // 11. Play Lecture Video
+    // 2. Profile & Certificates Navigation (/profile)
     if (
-      phrase === 'play video' ||
-      phrase === 'start video' ||
-      phrase === 'resume video' ||
-      phrase === 'listen video' ||
-      phrase === 'listen to video' ||
-      phrase === 'watch video' ||
-      phrase === 'lecture video' ||
-      phrase.includes('वीडियो चलाओ') ||
-      phrase.includes('लेक्चर')
+      stripped === 'profile' ||
+      stripped === 'my profile' ||
+      stripped === 'account' ||
+      stripped === 'my account' ||
+      stripped === 'user profile' ||
+      stripped === 'certificates' ||
+      stripped === 'certificate' ||
+      stripped === 'my certificates' ||
+      stripped === 'scores' ||
+      stripped === 'results' ||
+      stripped === 'marks' ||
+      stripped === 'சுயவிவரம்' ||
+      stripped === 'சான்றிதழ்' ||
+      clean.includes('profile') ||
+      clean.includes('certificate') ||
+      clean.includes('scores') ||
+      clean.includes('account') ||
+      clean.includes('प्रमाणपत्र') ||
+      clean.includes('प्रोफ़ाइल') ||
+      clean.includes('சுயவிவரம்') ||
+      clean.includes('சான்றிதழ்')
     ) {
-      lastCmdTimeRef.current = now;
+      return executeParsedCommand({
+        action: 'NAVIGATE',
+        target: '/profile',
+        description: 'Opening Profile & Certificates...',
+        tone: 620,
+      });
+    }
+
+    // 3. Homepage / Dashboard (/)
+    if (
+      stripped === 'home' ||
+      stripped === 'homepage' ||
+      stripped === 'dashboard' ||
+      stripped === 'main page' ||
+      stripped === 'landing' ||
+      stripped === 'portal' ||
+      stripped === 'welcome' ||
+      stripped === 'முகப்பு' ||
+      stripped === 'முதன்மை' ||
+      clean.includes('home') ||
+      clean.includes('dashboard') ||
+      clean.includes('होम') ||
+      clean.includes('डैशबोर्ड') ||
+      clean.includes('முகப்பு')
+    ) {
+      return executeParsedCommand({
+        action: 'NAVIGATE',
+        target: '/',
+        description: 'Navigating to Homepage...',
+        tone: 620,
+      });
+    }
+
+    // 4. Chatbot / AI Assistant (/chatbot)
+    if (
+      stripped === 'chatbot' ||
+      stripped === 'chat' ||
+      stripped === 'assistant' ||
+      stripped === 'ai assistant' ||
+      stripped === 'ai bot' ||
+      stripped === 'ask ai' ||
+      stripped === 'ask bot' ||
+      stripped === 'bot' ||
+      stripped === 'weather bot' ||
+      stripped === 'உரையாடல்' ||
+      stripped === 'உதவியாளர்' ||
+      clean.includes('chatbot') ||
+      clean.includes('assistant') ||
+      clean.includes('चैटबॉट') ||
+      clean.includes('सहायक') ||
+      clean.includes('உதவியாளர்')
+    ) {
+      return executeParsedCommand({
+        action: 'NAVIGATE',
+        target: '/chatbot',
+        description: 'Opening Meteorological Assistant...',
+        tone: 620,
+      });
+    }
+
+    // 5. Study Material / Lectures (/study)
+    if (
+      stripped === 'study' ||
+      stripped === 'study material' ||
+      stripped === 'study materials' ||
+      stripped === 'studies' ||
+      stripped === 'materials' ||
+      stripped === 'lecture' ||
+      stripped === 'lectures' ||
+      stripped === 'notes' ||
+      stripped === 'study notes' ||
+      stripped === 'lessons' ||
+      stripped === 'learning' ||
+      stripped === 'classroom' ||
+      stripped === 'படிப்பு' ||
+      stripped === 'பாடக் குறிப்புகள்' ||
+      clean.includes('study') ||
+      clean.includes('lecture') ||
+      clean.includes('notes') ||
+      clean.includes('अध्ययन') ||
+      clean.includes('पढ़ाई') ||
+      clean.includes('குறிப்புகள்')
+    ) {
+      return executeParsedCommand({
+        action: 'NAVIGATE',
+        target: '/study',
+        description: 'Opening Study Material...',
+        tone: 620,
+      });
+    }
+
+    // 6. Assessments & Exams Navigation
+    if (
+      stripped === 'assessment' ||
+      stripped === 'assessments' ||
+      stripped === 'exam' ||
+      stripped === 'exams' ||
+      stripped === 'test' ||
+      stripped === 'tests' ||
+      stripped === 'quiz' ||
+      stripped === 'quizzes' ||
+      stripped === 'take test' ||
+      stripped === 'start test' ||
+      stripped === 'parikshe' ||
+      clean.includes('assessment') ||
+      clean.includes('exam') ||
+      clean.includes('test') ||
+      clean.includes('परीक्षा')
+    ) {
+      return executeParsedCommand({
+        action: 'NAVIGATE',
+        target: '/courses',
+        description: 'Opening Assessments & Courses...',
+        tone: 620,
+      });
+    }
+
+    // 7. Login Page (/login)
+    if (
+      stripped === 'login' ||
+      stripped === 'log in' ||
+      stripped === 'sign in' ||
+      stripped === 'signin' ||
+      stripped === 'user login' ||
+      clean.includes('login') ||
+      clean.includes('log in') ||
+      clean.includes('sign in') ||
+      clean.includes('लॉगिन')
+    ) {
+      return executeParsedCommand({
+        action: 'NAVIGATE',
+        target: '/login',
+        description: 'Opening Login Page...',
+        tone: 620,
+      });
+    }
+
+    // 8. Signup Page (/signup)
+    if (
+      stripped === 'signup' ||
+      stripped === 'sign up' ||
+      stripped === 'register' ||
+      stripped === 'registration' ||
+      stripped === 'create account' ||
+      clean.includes('signup') ||
+      clean.includes('sign up') ||
+      clean.includes('register') ||
+      clean.includes('पंजीकरण')
+    ) {
+      return executeParsedCommand({
+        action: 'NAVIGATE',
+        target: '/signup',
+        description: 'Opening Registration...',
+        tone: 620,
+      });
+    }
+
+    // 9. Trainer Studio (/trainer)
+    if (
+      stripped === 'trainer' ||
+      stripped === 'trainer studio' ||
+      stripped === 'instructor' ||
+      clean.includes('trainer') ||
+      clean.includes('प्रशिक्षक')
+    ) {
+      return executeParsedCommand({
+        action: 'NAVIGATE',
+        target: '/trainer',
+        description: 'Opening Trainer Studio...',
+        tone: 620,
+      });
+    }
+
+    // 10. Admin Console (/admin)
+    if (
+      stripped === 'admin' ||
+      stripped === 'admin console' ||
+      stripped === 'admin panel' ||
+      clean.includes('admin') ||
+      clean.includes('व्यवस्थापक') ||
+      clean.includes('एडमिन')
+    ) {
+      return executeParsedCommand({
+        action: 'NAVIGATE',
+        target: '/admin',
+        description: 'Opening Admin Console...',
+        tone: 620,
+      });
+    }
+
+    // 11. Camera Diagnostics
+    if (
+      stripped === 'camera' ||
+      stripped === 'webcam' ||
+      stripped === 'camera test' ||
+      stripped === 'test camera' ||
+      clean.includes('camera') ||
+      clean.includes('webcam') ||
+      clean.includes('कैमरा')
+    ) {
+      return executeParsedCommand({
+        action: 'CAMERA_TEST',
+        description: 'Opening Camera Diagnostics...',
+        tone: 620,
+      });
+    }
+
+    // 12. Play Lecture Video
+    if (
+      clean === 'play video' ||
+      clean === 'start video' ||
+      clean === 'resume video' ||
+      clean === 'listen video' ||
+      clean === 'listen to video' ||
+      clean === 'watch video' ||
+      clean === 'lecture video' ||
+      clean.includes('वीडियो चलाओ') ||
+      clean.includes('लेक्चर')
+    ) {
       playTone(620, 0.1);
       setLastActionStatus('Playing lecture video...');
       window.dispatchEvent(new CustomEvent('imd-voice-video-play'));
       return true;
     }
 
-    // 12. Pause Lecture Video
+    // 13. Pause Lecture Video
     if (
-      phrase === 'pause video' ||
-      phrase === 'pause lecture' ||
-      phrase.includes('वीडियो रोको')
+      clean === 'pause video' ||
+      clean === 'pause lecture' ||
+      clean === 'stop video' ||
+      clean.includes('वीडियो रोको')
     ) {
-      lastCmdTimeRef.current = now;
       playTone(450, 0.1);
       setLastActionStatus('Paused lecture video');
       window.dispatchEvent(new CustomEvent('imd-voice-video-pause'));
       return true;
     }
 
-    // 13. Read Aloud / Listen Study Notes
+    // 14. Video Speed Controls
+    if (clean === 'speed up' || clean === 'faster' || clean === '2x speed' || clean === 'fast') {
+      playTone(650, 0.1);
+      return executeParsedCommand({ action: 'VIDEO_SPEED', speed: 1.5, description: 'Speed set to 1.5x' });
+    }
+
+    if (clean === 'normal speed' || clean === 'slow down' || clean === '1x speed' || clean === 'regular speed') {
+      playTone(550, 0.1);
+      return executeParsedCommand({ action: 'VIDEO_SPEED', speed: 1.0, description: 'Speed set to 1.0x (Normal)' });
+    }
+
+    // 15. Study Module Navigation
     if (
-      phrase === 'read aloud' ||
-      phrase === 'read notes' ||
-      phrase === 'read this' ||
-      phrase === 'listen notes' ||
-      phrase === 'listen study notes' ||
-      phrase === 'listen study' ||
-      phrase === 'listen to notes' ||
-      phrase === 'read study notes' ||
-      phrase === 'speak notes' ||
-      phrase === 'listen' ||
-      phrase.includes('बोलकर सुनाओ') ||
-      phrase.includes('पढ़ो') ||
-      phrase.includes('सुनो') ||
-      phrase.includes('नोट्स')
+      clean === 'next module' ||
+      clean === 'next topic' ||
+      clean === 'next lecture' ||
+      clean === 'next lesson' ||
+      clean.includes('अगला टॉपिक') ||
+      clean.includes('अगला पाठ')
     ) {
-      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
+      return executeParsedCommand({ action: 'MODULE_NEXT', description: 'Next Lecture Topic' });
+    }
+
+    if (
+      clean === 'previous module' ||
+      clean === 'previous topic' ||
+      clean === 'previous lecture' ||
+      clean === 'previous lesson' ||
+      clean.includes('पिछला टॉपिक') ||
+      clean.includes('पिछला पाठ')
+    ) {
+      playTone(520, 0.1);
+      return executeParsedCommand({ action: 'MODULE_PREV', description: 'Previous Lecture Topic' });
+    }
+
+    // 16. Read Aloud / Listen Study Notes
+    if (
+      clean === 'read aloud' ||
+      clean === 'read notes' ||
+      clean === 'read this' ||
+      clean === 'listen notes' ||
+      clean === 'listen study notes' ||
+      clean === 'listen study' ||
+      clean === 'listen to notes' ||
+      clean === 'read study notes' ||
+      clean === 'speak notes' ||
+      clean === 'listen' ||
+      clean.includes('बोलकर सुनाओ') ||
+      clean.includes('पढ़ो') ||
+      clean.includes('सुनो') ||
+      clean.includes('नोट्स')
+    ) {
       playTone(620, 0.1);
       setLastActionStatus('Reading notes aloud...');
       window.dispatchEvent(new CustomEvent('imd-voice-read-aloud'));
       return true;
     }
 
-    // 14. Stop / Silence Active Speech & Video
+    // 17. Read Question Aloud
     if (
-      phrase === 'stop' ||
-      phrase === 'stop audio' ||
-      phrase === 'quiet' ||
-      phrase === 'silence' ||
-      phrase === 'रुको' ||
-      phrase === 'शांत'
+      clean === 'read question' ||
+      clean === 'read question aloud' ||
+      clean === 'speak question' ||
+      clean === 'what is the question' ||
+      clean.includes('प्रश्न पढ़ो') ||
+      clean.includes('सवाल पढ़ो')
     ) {
-      lastCmdTimeRef.current = now;
+      playTone(620, 0.1);
+      return executeParsedCommand({ action: 'READ_QUESTION', description: 'Reading Question Aloud...' });
+    }
+
+    // 18. Stop / Silence Active Speech & Video
+    if (
+      clean === 'stop' ||
+      clean === 'stop audio' ||
+      clean === 'quiet' ||
+      clean === 'silence' ||
+      clean === 'रुको' ||
+      clean === 'शांत'
+    ) {
       playTone(400, 0.1);
       setLastActionStatus('Audio & Video stopped');
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
@@ -779,56 +1131,98 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return true;
     }
 
-    // 12. Submit Assessment Attempt
+    // 19. Course Filtering & Enrollment
+    if (clean === 'filter long duration' || clean === 'long term courses' || clean === 'long duration') {
+      playTone(600, 0.1);
+      return executeParsedCommand({ action: 'COURSE_FILTER', filter: 'LONG', description: 'Showing Long-Duration Courses' });
+    }
+
+    if (clean === 'filter short duration' || clean === 'short term courses' || clean === 'refresher courses') {
+      playTone(600, 0.1);
+      return executeParsedCommand({ action: 'COURSE_FILTER', filter: 'SHORT', description: 'Showing Short/Refresher Courses' });
+    }
+
+    if (clean === 'all courses' || clean === 'clear filter' || clean === 'reset filter') {
+      playTone(600, 0.1);
+      return executeParsedCommand({ action: 'COURSE_FILTER', filter: 'ALL', description: 'Showing All Courses' });
+    }
+
+    if (clean === 'enroll' || clean === 'enroll course' || clean === 'start course' || clean === 'start study' || clean.includes('नामांकन')) {
+      playTone(680, 0.12);
+      return executeParsedCommand({ action: 'ENROLL', description: 'Enrolling in course...' });
+    }
+
+    // 20. Chatbot AI Actions
     if (
-      phrase === 'submit assessment' ||
-      phrase === 'submit test' ||
-      phrase === 'finish assessment' ||
-      phrase === 'submit' ||
-      phrase.includes('सबमिट')
+      clean === 'send message' ||
+      clean === 'send question' ||
+      clean === 'send chat' ||
+      clean === 'submit question' ||
+      clean === 'भेजो'
     ) {
-      lastCmdTimeRef.current = now;
+      playTone(680, 0.12);
+      return executeParsedCommand({ action: 'CHATBOT_SEND', description: 'Sending Chatbot Message...' });
+    }
+
+    if (clean === 'clear chat' || clean === 'new chat' || clean === 'reset chat') {
+      playTone(450, 0.1);
+      return executeParsedCommand({ action: 'CHATBOT_CLEAR', description: 'Cleared Chat History' });
+    }
+
+    // 21. Submit Assessment Attempt
+    if (
+      clean === 'submit assessment' ||
+      clean === 'submit test' ||
+      clean === 'finish assessment' ||
+      clean === 'submit' ||
+      clean.includes('सबमिट')
+    ) {
       playTone(720, 0.15);
       setLastActionStatus('Submitting Assessment...');
       window.dispatchEvent(new CustomEvent('imd-voice-submit'));
       return true;
     }
 
-    // 13. Next Question in Assessment
+    // 22. Next Question in Assessment
     if (
-      phrase === 'next question' ||
-      phrase === 'next' ||
-      phrase.includes('अगला प्रश्न') ||
-      phrase === 'अगला'
+      clean === 'next question' ||
+      clean === 'next' ||
+      clean.includes('अगला प्रश्न') ||
+      clean === 'अगला'
     ) {
-      lastCmdTimeRef.current = now;
       playTone(620, 0.1);
       setLastActionStatus('Next Question');
       window.dispatchEvent(new CustomEvent('imd-voice-next-question'));
       return true;
     }
 
-    // 14. Previous Question in Assessment
+    // 23. Previous Question in Assessment
     if (
-      phrase === 'previous question' ||
-      phrase === 'previous' ||
-      phrase === 'back' ||
-      phrase.includes('पिछला प्रश्न') ||
-      phrase === 'पिछला'
+      clean === 'previous question' ||
+      clean === 'previous' ||
+      clean === 'back' ||
+      clean.includes('पिछला प्रश्न') ||
+      clean === 'पिछला'
     ) {
-      lastCmdTimeRef.current = now;
       playTone(520, 0.1);
       setLastActionStatus('Previous Question');
       window.dispatchEvent(new CustomEvent('imd-voice-prev-question'));
       return true;
     }
 
-    // 15. Option selection in MCQ ("Option A", "Select B", "विकल्प सी", or standalone "A", "B", "C", "D")
-    const optionMatch = phrase.match(
+    // 24. Jump to specific question ("question 1", "question 2", "go to question 4", "प्रश्न 3")
+    const questionJumpMatch = clean.match(/(?:go to\s+)?(?:question|q|प्रश्न)\s*(\d+)/i);
+    if (questionJumpMatch) {
+      const qNum = parseInt(questionJumpMatch[1], 10);
+      playTone(600, 0.1);
+      return executeParsedCommand({ action: 'ASSESSMENT_JUMP', questionNumber: qNum, description: `Jump to Question ${qNum}` });
+    }
+
+    // 25. Option selection in MCQ ("Option A", "Select B", "विकल्प सी", or standalone "A", "B", "C", "D")
+    const optionMatch = clean.match(
       /(?:option|select|choose|answer|विकल्प)\s*([a-d])\b|^([a-d])$/i
     );
     if (optionMatch) {
-      lastCmdTimeRef.current = now;
       const opt = (optionMatch[1] || optionMatch[2]).toUpperCase();
       playTone(650, 0.1);
       setLastActionStatus(`Selected Option ${opt}`);
@@ -836,41 +1230,43 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return true;
     }
 
-    // 16. Clear active input box
+    // 26. Clear active question answer in assessment
+    if (clean === 'clear answer' || clean === 'erase answer' || clean === 'clear option' || clean.includes('उत्तर मिटाओ')) {
+      playTone(450, 0.1);
+      return executeParsedCommand({ action: 'CLEAR_ANSWER', description: 'Cleared Question Answer' });
+    }
+
+    // 27. Clear active input box
     if (
-      phrase === 'clear' ||
-      phrase === 'clear box' ||
-      phrase === 'clear input' ||
-      phrase === 'erase' ||
-      phrase === 'मिटाओ'
+      clean === 'clear' ||
+      clean === 'clear box' ||
+      clean === 'clear input' ||
+      clean === 'erase' ||
+      clean === 'मिटाओ'
     ) {
-      lastCmdTimeRef.current = now;
-      fillActiveInput('');
+      fillActiveInput('', true);
       playTone(450, 0.1);
       setLastActionStatus('Cleared Input Box');
       return true;
     }
 
-    // 17. UNIVERSAL DICTATION & BOX AUTO-FILL
-    // Spoken words automatically fill whatever input box is active or visible!
+    // 28. Explicit Dictation & Focused Box Filling
+    const isExplicitDictation = /^(type|write|fill|search for|search|input|डालो|लिखो)\s+/i.test(rawPhrase);
     const cleanDictation = rawPhrase
       .replace(/^(type|write|fill|search for|search|input|डालो|लिखो)\s+/i, '')
       .trim();
 
     const textToFill = cleanDictation || rawPhrase;
-    const filledActive = fillActiveInput(textToFill);
+    const filledActive = fillActiveInput(textToFill, isExplicitDictation);
 
     if (filledActive) {
       playTone(720, 0.08);
       setLastActionStatus(`Filled box: "${textToFill}"`);
-      console.log('[Auto-Filled Box With]:', textToFill);
     } else {
       setLastActionStatus(`Heard: "${rawPhrase}"`);
     }
 
-    // 18. Broadcast for route-specific handlers (Chatbot, CourseBrowse, Assessment)
     window.dispatchEvent(new CustomEvent('imd-voice-general', { detail: textToFill }));
-
     return filledActive;
   };
 
@@ -936,9 +1332,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setLastRecognizedPhrase(candidatePhrase);
           setAudioLevel(95);
 
-          // If result is final, execute command or box-fill immediately
-          if (final.trim()) {
-            processVoiceCommand(final.trim());
+          // Zero-delay instant navigation:
+          // Checks words as they are being spoken in real-time
+          const executed = processVoiceCommand(candidatePhrase);
+          if (executed) {
+            console.log('[Instant Voice Navigation Triggered]:', candidatePhrase);
           }
         }
       };
@@ -1113,7 +1511,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch {}
       stopActiveSession();
       playTone(320, 0.15);
-      setLastActionStatus('Voice turned off');
+      setLastRecognizedPhrase('');
+      setLastActionStatus('');
 
       // Pause Python background microphone listener
       fetch('/api/voice/listener-control', {

@@ -34,7 +34,7 @@ export const Navbar: React.FC = () => {
           <span className="text-slate-600">•</span>
           <span>पृथ्वी विज्ञान मंत्रालय | Ministry of Earth Sciences</span>
           <span className="text-slate-600">•</span>
-          <span className="text-amber-400 font-medium">SIH 2026 PS #26075</span>
+          <span className="text-blue-400 font-medium">National Meteorological Training Framework</span>
         </div>
 
         <div className="flex items-center gap-3 text-[11px] text-slate-400">
@@ -175,65 +175,6 @@ export const Navbar: React.FC = () => {
             )}
           </div>
         </div>
-
-        {/* Live Voice Command Bar (Shown whenever Voice Control is ON) */}
-        {isVoiceActive && (
-          <div className="py-1.5 px-4 bg-gradient-to-r from-red-950/90 via-slate-900 to-red-950/90 border-t border-red-800/60 flex flex-wrap items-center justify-between text-xs text-red-200 animate-in fade-in duration-200 gap-2">
-            <div className="flex items-center gap-2.5">
-              <div className="relative flex items-center justify-center">
-                <span className="w-3 h-3 rounded-full bg-red-500 animate-ping absolute" />
-                <span className="w-2 h-2 rounded-full bg-red-400" />
-              </div>
-              <Mic className="w-3.5 h-3.5 text-red-400 animate-pulse" />
-              <span className="font-semibold text-white">
-                {lastRecognizedPhrase ? (
-                  <>Heard: <strong className="text-amber-300 font-mono text-xs">"{lastRecognizedPhrase}"</strong></>
-                ) : (
-                  <span className="text-red-200 animate-pulse">Listening... Speak now to navigate</span>
-                )}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-300">
-              <span className="text-slate-400 mr-1">Say or click:</span>
-              <button
-                type="button"
-                onClick={() => navigate('/courses')}
-                className="px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 font-mono text-amber-300 border border-slate-700 hover:border-amber-400 transition"
-              >
-                "courses"
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/profile')}
-                className="px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 font-mono text-amber-300 border border-slate-700 hover:border-amber-400 transition"
-              >
-                "profile"
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/chatbot')}
-                className="px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 font-mono text-amber-300 border border-slate-700 hover:border-amber-400 transition"
-              >
-                "chatbot"
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/')}
-                className="px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 font-mono text-amber-300 border border-slate-700 hover:border-amber-400 transition"
-              >
-                "home"
-              </button>
-              <button
-                type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('imd-voice-read-aloud'))}
-                className="px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 font-mono text-amber-300 border border-slate-700 hover:border-amber-400 transition"
-              >
-                "read aloud"
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </header>
   );

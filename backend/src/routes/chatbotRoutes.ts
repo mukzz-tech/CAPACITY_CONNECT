@@ -1,12 +1,12 @@
 import { Router, Response } from 'express';
 import { prisma } from '../prisma.js';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { authenticate, authenticateOptional, AuthenticatedRequest } from '../middleware/auth.js';
 import { ChatbotService } from '../services/chatbotService.js';
 
 const router = Router();
 
-// 1. Ask a question to the AI Assistant
-router.post('/ask', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+// 1. Ask a question to the AI Assistant (Available to logged in users and guests)
+router.post('/ask', authenticateOptional, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { question, sessionId } = req.body;
 
@@ -16,7 +16,7 @@ router.post('/ask', authenticate, async (req: AuthenticatedRequest, res: Respons
     }
 
     const result = await ChatbotService.answerQuestion(
-      req.user!.userId,
+      req.user?.userId,
       question,
       sessionId
     );

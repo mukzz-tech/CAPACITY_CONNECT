@@ -9,7 +9,7 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const rawText = (req.query.text as string || '').trim();
     const langParam = (req.query.lang as string || 'en').toLowerCase();
-    const lang = langParam.startsWith('hi') ? 'hi' : 'en';
+    const lang = langParam.startsWith('hi') ? 'hi' : langParam.startsWith('ta') ? 'ta' : 'en';
 
     if (!rawText) {
       return res.status(400).json({ error: 'Text query parameter is required' });

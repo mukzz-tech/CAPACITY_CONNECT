@@ -68,6 +68,18 @@ export const CourseDetailPage: React.FC = () => {
     if (id) fetchDetails();
   }, [id, user]);
 
+  useEffect(() => {
+    const handleVoiceEnroll = () => {
+      if (isEnrolled) {
+        navigate(`/courses/${id}/study`);
+      } else {
+        handleEnroll();
+      }
+    };
+    window.addEventListener('imd-voice-enroll', handleVoiceEnroll);
+    return () => window.removeEventListener('imd-voice-enroll', handleVoiceEnroll);
+  }, [id, isEnrolled, user]);
+
   const handleEnroll = async () => {
     if (!user) {
       navigate('/login');

@@ -20,6 +20,7 @@ interface ChatMsg {
   sender: 'user' | 'assistant';
   content: string;
   isCached?: boolean;
+  source?: string;
 }
 
 export const ChatbotPage: React.FC = () => {
@@ -29,7 +30,8 @@ export const ChatbotPage: React.FC = () => {
     {
       sender: 'assistant',
       content:
-        'Namaste! I am the IMD Capacity Connect Assistant. You can ask me about meteorological course syllabi, promotion eligibility, your personal competency gaps, or assessment grading criteria.',
+        'Namaste! I am the IMD Meteorological AI Assistant. You can ask me any theoretical or practical question from our study materials (e.g. Doppler radar formulas, cyclone warning stages, atmospheric thermodynamics), course syllabi, promotion eligibility, or assessment grading criteria.',
+      source: 'IMD Meteorological Knowledge Engine',
     },
   ]);
   const [input, setInput] = useState('');
@@ -39,10 +41,12 @@ export const ChatbotPage: React.FC = () => {
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
   const faqQueries = [
+    'Explain Doppler Weather Radar principles and reflectivity thresholds',
+    'What are the 4 stages of IMD cyclone warnings?',
+    'Explain dry and saturated adiabatic lapse rates (DALR / SALR)',
+    'What are the surface weather observation standards per WMO-No. 8?',
     'What is the eligibility for the Forecasters Training Course?',
     'What courses do I still need for my next promotion?',
-    'What are the passing grades and criteria?',
-    'How does proctoring work and is my video recorded?',
   ];
 
   const scrollToBottom = () => {
@@ -53,20 +57,46 @@ export const ChatbotPage: React.FC = () => {
     scrollToBottom();
   }, [messages]);
 
+  const inputRef = useRef<string>('');
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
+
   useEffect(() => {
     const handleVoiceDictation = (e: any) => {
       const phrase = e.detail;
       if (!phrase) return;
       // Skip navigation phrases
-      if (['courses', 'profile', 'home', 'chatbot', 'camera', 'read aloud', 'stop'].includes(phrase.toLowerCase().trim())) {
+      if (['courses', 'profile', 'home', 'chatbot', 'camera', 'read aloud', 'stop', 'help', 'scroll down', 'scroll up'].includes(phrase.toLowerCase().trim())) {
         return;
       }
       const clean = phrase.replace(/^(ask|question|doubt|search|tell me)\s*/i, '').trim();
       setInput(clean);
       playTone(650, 0.08);
     };
+
+    const handleVoiceSendMessage = () => {
+      const curr = inputRef.current;
+      if (curr && curr.trim()) {
+        handleSend(curr.trim());
+      }
+    };
+
+    const handleVoiceClearChat = () => {
+      setMessages([]);
+      setInput('');
+      playTone(450, 0.1);
+    };
+
     window.addEventListener('imd-voice-general', handleVoiceDictation);
-    return () => window.removeEventListener('imd-voice-general', handleVoiceDictation);
+    window.addEventListener('imd-voice-send-message', handleVoiceSendMessage);
+    window.addEventListener('imd-voice-clear-chat', handleVoiceClearChat);
+
+    return () => {
+      window.removeEventListener('imd-voice-general', handleVoiceDictation);
+      window.removeEventListener('imd-voice-send-message', handleVoiceSendMessage);
+      window.removeEventListener('imd-voice-clear-chat', handleVoiceClearChat);
+    };
   }, []);
 
   const chatbotAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -138,6 +168,7 @@ export const ChatbotPage: React.FC = () => {
             sender: 'assistant',
             content: data.answer,
             isCached: data.isCached,
+            source: data.source || (data.isCached ? 'IMD FAQ Knowledge Cache' : 'IMD Study Content Knowledge Engine'),
           },
         ]);
         // Audibly speak out response if autoSpeak is enabled ("make noise")
@@ -271,7 +302,7 @@ export const ChatbotPage: React.FC = () => {
               <div className="whitespace-pre-wrap">{m.content}</div>
 
               {m.sender === 'assistant' && (
-                <div className="mt-3 pt-2 border-t border-slate-200/80 flex items-center justify-between text-[10px] text-slate-500">
+                <div className="mt-3 pt-2 border-t border-slate-200/80 flex items-center justify-between text-[10px] text-slate-500 gap-2 flex-wrap">
                   <button
                     onClick={() => speakAloud(m.content)}
                     className="flex items-center gap-1 text-blue-700 font-semibold hover:underline"
@@ -281,12 +312,21 @@ export const ChatbotPage: React.FC = () => {
                     <span>Play Voice</span>
                   </button>
 
-                  {m.isCached && (
-                    <span className="flex items-center gap-1 text-emerald-700 font-mono">
-                      <CheckCircle className="w-3 h-3 text-emerald-600" />
-                      <span>FAQ Cached (0 Cost)</span>
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {m.source && (
+                      <span className="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200 flex items-center gap-1 font-medium">
+                        <Sparkles className="w-2.5 h-2.5 text-amber-500" />
+                        <span>{m.source}</span>
+                      </span>
+                    )}
+
+                    {m.isCached && (
+                      <span className="flex items-center gap-1 text-emerald-700 font-mono">
+                        <CheckCircle className="w-3 h-3 text-emerald-600" />
+                        <span>Cached</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

@@ -242,8 +242,53 @@ export const AssessmentPage: React.FC = () => {
       }
     };
 
+    const handleVoiceJumpQuestion = (e: any) => {
+      const qNum = typeof e.detail === 'number' ? e.detail : parseInt(e.detail, 10);
+      if (assessmentRef.current && assessmentRef.current.questions) {
+        const total = assessmentRef.current.questions.length;
+        if (qNum >= 1 && qNum <= total) {
+          const targetIdx = qNum - 1;
+          setActiveQuestionIndex(targetIdx);
+          playTone(600, 0.1);
+          speakText(`Question ${qNum}`);
+        }
+      }
+    };
+
+    const handleVoiceReadQuestion = () => {
+      const questions = assessmentRef.current?.questions;
+      const currIdx = activeQuestionIndexRef.current;
+      if (!questions || !questions[currIdx]) return;
+      const q = questions[currIdx];
+      let toRead = `Question ${currIdx + 1}: ${q.promptText}.`;
+      if (q.questionType === 'MCQ' && q.options) {
+        toRead += ' Options are: ';
+        q.options.forEach((opt: any) => {
+          toRead += `Option ${opt.id}, ${opt.text}. `;
+        });
+      }
+      speakText(toRead);
+    };
+
+    const handleVoiceClearAnswer = () => {
+      const questions = assessmentRef.current?.questions;
+      const currIdx = activeQuestionIndexRef.current;
+      if (!questions || !questions[currIdx]) return;
+      const q = questions[currIdx];
+      setSubmissions((prev) => {
+        const copy = { ...prev };
+        delete copy[q.id];
+        return copy;
+      });
+      playTone(450, 0.1);
+      speakText('Answer cleared');
+    };
+
     window.addEventListener('imd-voice-next-question', handleNextQuestion);
     window.addEventListener('imd-voice-prev-question', handlePrevQuestion);
+    window.addEventListener('imd-voice-jump-question', handleVoiceJumpQuestion);
+    window.addEventListener('imd-voice-read-question', handleVoiceReadQuestion);
+    window.addEventListener('imd-voice-clear-answer', handleVoiceClearAnswer);
     window.addEventListener('imd-voice-submit', handleVoiceSubmit);
     window.addEventListener('imd-voice-option-select', handleVoiceOptionSelect);
     window.addEventListener('imd-voice-general', handleVoiceGeneral);
@@ -251,6 +296,9 @@ export const AssessmentPage: React.FC = () => {
     return () => {
       window.removeEventListener('imd-voice-next-question', handleNextQuestion);
       window.removeEventListener('imd-voice-prev-question', handlePrevQuestion);
+      window.removeEventListener('imd-voice-jump-question', handleVoiceJumpQuestion);
+      window.removeEventListener('imd-voice-read-question', handleVoiceReadQuestion);
+      window.removeEventListener('imd-voice-clear-answer', handleVoiceClearAnswer);
       window.removeEventListener('imd-voice-submit', handleVoiceSubmit);
       window.removeEventListener('imd-voice-option-select', handleVoiceOptionSelect);
       window.removeEventListener('imd-voice-general', handleVoiceGeneral);

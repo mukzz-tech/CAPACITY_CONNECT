@@ -80,12 +80,13 @@ export const SignupPage: React.FC = () => {
               </div>
             </div>
           ) : (
-            <form className="space-y-4" onSubmit={handleSubmit}>
+            <form className="space-y-4" onSubmit={handleSubmit} autoComplete="off">
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Full Name</label>
                 <input
                   type="text"
                   required
+                  autoComplete="name"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="e.g. Rajesh Sharma"
@@ -98,6 +99,7 @@ export const SignupPage: React.FC = () => {
                 <input
                   type="email"
                   required
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@imd.gov.in"
@@ -110,6 +112,7 @@ export const SignupPage: React.FC = () => {
                 <input
                   type="password"
                   required
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
