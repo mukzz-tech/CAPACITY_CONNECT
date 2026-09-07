@@ -263,3 +263,122 @@ export async function analyzeVideoFrame(
     message: 'Normal: 1 Face Detected & Focused (100% Attentiveness)',
   };
 }
+
+/**
+ * Renders high-tech Computer Vision HUD overlay with real-time face tracking reticles,
+ * attentiveness bounding box, and condition banner directly onto the canvas.
+ */
+export function drawProctorOverlay(
+  canvas: HTMLCanvasElement,
+  result: VisionAnalysisResult,
+  targetWidth = 320,
+  targetHeight = 240
+) {
+  if (!canvas) return;
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.clearRect(0, 0, targetWidth, targetHeight);
+
+  const scaleX = targetWidth / 160;
+  const scaleY = targetHeight / 120;
+
+  // Colors based on proctoring condition
+  const isNormal = result.condition === 'NORMAL';
+  const isAway = result.condition === 'FACE_TURNED_AWAY';
+  const isFlag =
+    result.condition === 'NO_FACE_DETECTED' || result.condition === 'MULTIPLE_FACES_DETECTED';
+
+  const color = isNormal ? '#10b981' : isAway ? '#f59e0b' : '#ef4444';
+  const bgColor = isNormal
+    ? 'rgba(16, 185, 129, 0.12)'
+    : isAway
+    ? 'rgba(245, 158, 11, 0.18)'
+    : 'rgba(239, 68, 68, 0.22)';
+
+  // Determine bounding box
+  const bb = result.boundingBox || { x: 45, y: 25, width: 70, height: 75 };
+  const bx = bb.x * scaleX;
+  const by = bb.y * scaleY;
+  const bw = Math.max(70, bb.width * scaleX);
+  const bh = Math.max(80, bb.height * scaleY);
+
+  if (!isFlag) {
+    // 1. Draw corner brackets around detected face
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    const cornerLen = 14;
+
+    // Top-left
+    ctx.beginPath();
+    ctx.moveTo(bx, by + cornerLen);
+    ctx.lineTo(bx, by);
+    ctx.lineTo(bx + cornerLen, by);
+    ctx.stroke();
+
+    // Top-right
+    ctx.beginPath();
+    ctx.moveTo(bx + bw - cornerLen, by);
+    ctx.lineTo(bx + bw, by);
+    ctx.lineTo(bx + bw, by + cornerLen);
+    ctx.stroke();
+
+    // Bottom-left
+    ctx.beginPath();
+    ctx.moveTo(bx, by + bh - cornerLen);
+    ctx.lineTo(bx, by + bh);
+    ctx.lineTo(bx + cornerLen, by + bh);
+    ctx.stroke();
+
+    // Bottom-right
+    ctx.beginPath();
+    ctx.moveTo(bx + bw - cornerLen, by + bh);
+    ctx.lineTo(bx + bw, by + bh);
+    ctx.lineTo(bx + bw, by + bh - cornerLen);
+    ctx.stroke();
+
+    // Fill subtle tinted box
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(bx, by, bw, bh);
+
+    // Center Crosshair
+    const cx = bx + bw / 2;
+    const cy = by + bh / 2;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 8, cy);
+    ctx.lineTo(cx + 8, cy);
+    ctx.moveTo(cx, cy - 8);
+    ctx.lineTo(cx, cy + 8);
+    ctx.stroke();
+
+    // Face Tag Label
+    ctx.fillStyle = color;
+    ctx.fillRect(bx, Math.max(0, by - 16), 115, 16);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText(`FACE [${result.gazeDirection.toUpperCase()}]`, bx + 4, Math.max(11, by - 4));
+  } else {
+    // Red alert border across canvas
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]);
+    ctx.strokeRect(15, 15, targetWidth - 30, targetHeight - 30);
+    ctx.setLineDash([]);
+  }
+
+  // Top Status Bar
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+  ctx.fillRect(0, 0, targetWidth, 18);
+  ctx.fillStyle = color;
+  ctx.font = 'bold 9px monospace';
+  ctx.fillText(
+    `AI VISION: ${result.condition} • CONF: ${(result.confidence * 100).toFixed(0)}%`,
+    6,
+    12
+  );
+}
+

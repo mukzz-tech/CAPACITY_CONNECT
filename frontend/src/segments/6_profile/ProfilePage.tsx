@@ -30,7 +30,7 @@ import {
   setSimulatedGaze,
   getSimulatedGaze,
 } from '../../utils/cameraManager';
-import { analyzeVideoFrame } from '../../utils/visionProctor';
+import { analyzeVideoFrame, drawProctorOverlay } from '../../utils/visionProctor';
 
 export const ProfilePage: React.FC = () => {
   const { user, refreshUser } = useAuth();
@@ -176,6 +176,7 @@ export const ProfilePage: React.FC = () => {
         const res = await analyzeVideoFrame(testVideoRef.current, testCanvasRef.current);
         setVisionCondition(res.condition);
         setVisionGaze(res.gazeDirection);
+        drawProctorOverlay(testCanvasRef.current, res, 320, 240);
 
         if (res.condition === 'NO_FACE_DETECTED') {
           setCameraStatusMsg('🔴 FLAG: No face detected in frame (Stepped away or covered -10 pts)');
@@ -187,7 +188,7 @@ export const ProfilePage: React.FC = () => {
           setCameraStatusMsg('🟢 Normal: 1 Face Detected & Focused (100% Attentiveness)');
         }
       }
-    }, 700);
+    }, 400);
 
     return () => clearInterval(interval);
   }, [testCameraActive, selectedCameraMode]);
@@ -690,7 +691,12 @@ export const ProfilePage: React.FC = () => {
                   testCameraActive ? 'block' : 'hidden'
                 }`}
               />
-              <canvas ref={testCanvasRef} className="hidden" />
+              <canvas
+                ref={testCanvasRef}
+                className={`absolute inset-0 w-full h-full pointer-events-none ${
+                  testCameraActive ? 'block' : 'hidden'
+                }`}
+              />
 
               {!testCameraActive && (
                 <div className="text-center px-4 space-y-1">

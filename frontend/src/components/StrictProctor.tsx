@@ -10,7 +10,7 @@ import {
   setSimulatedGaze,
   getSimulatedGaze,
 } from '../utils/cameraManager';
-import { analyzeVideoFrame } from '../utils/visionProctor';
+import { analyzeVideoFrame, drawProctorOverlay } from '../utils/visionProctor';
 
 interface StrictProctorProps {
   attemptId: string;
@@ -197,6 +197,7 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
         if (video.readyState >= 2) {
           const res = await analyzeVideoFrame(video, canvas);
           setCurrentGaze(res.gazeDirection);
+          drawProctorOverlay(canvas, res, 320, 240);
 
           if (res.condition === 'NO_FACE_DETECTED') {
             noFaceDurationRef.current += 1;
@@ -287,7 +288,12 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
             hasWebcam ? 'opacity-100' : 'opacity-0 absolute'
           }`}
         />
-        <canvas ref={canvasRef} className="hidden" />
+        <canvas
+          ref={canvasRef}
+          className={`absolute inset-0 w-full h-full pointer-events-none object-cover ${
+            hasWebcam ? 'block' : 'hidden'
+          }`}
+        />
 
         {/* Simulated feed representation */}
         {isSimulatedMode && !hasWebcam && (

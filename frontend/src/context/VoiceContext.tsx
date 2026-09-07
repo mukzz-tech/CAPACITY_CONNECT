@@ -9,6 +9,8 @@ export interface VoiceContextType {
   supported: boolean;
   audioLevel: number;
   lastActionStatus: string;
+  currentLanguage: string;
+  setLanguage: (lang: string) => void;
   speakText: (text: string, lang?: string, onComplete?: () => void) => void;
   playTone: (freq?: number, duration?: number) => void;
   pauseListening: () => void;
@@ -98,9 +100,9 @@ export const fillActiveInput = (text: string): boolean => {
 export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('imd_voice_active') === 'true';
+      return localStorage.getItem('imd_voice_active') !== 'false';
     } catch {
-      return false;
+      return true;
     }
   });
   const [isListening, setIsListening] = useState<boolean>(false);
@@ -108,6 +110,18 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [lastActionStatus, setLastActionStatus] = useState<string>('');
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const [supported, setSupported] = useState<boolean>(true);
+
+  const [currentLanguage, setCurrentLanguageState] = useState<string>('en-IN');
+  const recognitionLangRef = useRef<string>('en-IN');
+
+  const setLanguage = (lang: string) => {
+    setCurrentLanguageState(lang);
+    recognitionLangRef.current = lang;
+    stopActiveSession();
+    if (isVoiceActiveRef.current && !isPausedRef.current) {
+      startNewListeningSession();
+    }
+  };
 
   const activeRecognitionRef = useRef<any>(null);
   const isSessionStartingRef = useRef<boolean>(false);
@@ -190,53 +204,20 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  // Starts real-time Web Audio VU Meter to detect physical microphone volume
+  // Verifies microphone access without locking the hardware device
   const startMicAudioMeter = async () => {
     try {
-      if (micStreamRef.current && audioContextRef.current) return;
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-      micStreamRef.current = stream;
-
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-
-      const ctx = new AudioCtx();
-      audioContextRef.current = ctx;
-
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 64;
-      analyserRef.current = analyser;
-      source.connect(analyser);
-
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-
-      const updateLevel = () => {
-        if (!analyserRef.current || !isVoiceActiveRef.current) return;
-        analyserRef.current.getByteFrequencyData(dataArray);
-
-        let sum = 0;
-        for (let i = 0; i < bufferLength; i++) {
-          sum += dataArray[i];
-        }
-        const avg = sum / bufferLength;
-        const normalized = Math.min(100, Math.round((avg / 90) * 100));
-        setAudioLevel(normalized);
-
-        animFrameRef.current = requestAnimationFrame(updateLevel);
-      };
-
-      updateLevel();
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true },
+        });
+        // Immediately stop tracks to free Windows hardware lock for SpeechRecognition
+        stream.getTracks().forEach((track) => {
+          try { track.stop(); } catch {}
+        });
+      }
     } catch (e) {
-      console.warn('Audio meter init error (mic may already be shared):', e);
+      console.warn('Mic permission check warning:', e);
     }
   };
 
@@ -246,7 +227,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       animFrameRef.current = null;
     }
     if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((track) => track.stop());
+      micStreamRef.current.getTracks().forEach((track) => {
+        try { track.stop(); } catch {}
+      });
       micStreamRef.current = null;
     }
     if (audioContextRef.current) {
@@ -630,11 +613,23 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const recognition = new SpeechRecognition();
       recognition.continuous = false; // Fresh session per phrase prevents zombie hangs
       recognition.interimResults = true;
-      recognition.lang = 'en-IN'; // Accent-resilient
+      recognition.lang = recognitionLangRef.current || 'en-IN';
 
       recognition.onstart = () => {
         isSessionStartingRef.current = false;
         setIsListening(true);
+      };
+
+      recognition.onaudiostart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onspeechstart = () => {
+        setAudioLevel(85);
+      };
+
+      recognition.onspeechend = () => {
+        setAudioLevel(15);
       };
 
       recognition.onresult = (event: any) => {
@@ -653,6 +648,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const candidatePhrase = (final || interim).trim();
         if (candidatePhrase) {
           setLastRecognizedPhrase(candidatePhrase);
+          setAudioLevel(95);
 
           // If result is final, execute command or box-fill immediately
           if (final.trim()) {
@@ -663,14 +659,19 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       recognition.onerror = (event: any) => {
         isSessionStartingRef.current = false;
+        setAudioLevel(0);
 
-        if (event.error === 'not-allowed') {
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
           setLastActionStatus('⚠️ Mic blocked. Click lock in address bar to Allow.');
           return;
         }
 
-        // 'no-speech', 'aborted', and 'network' are transient; onend will re-arm cleanly
-        if (event.error !== 'no-speech') {
+        if (event.error === 'network') {
+          recognitionLangRef.current = recognitionLangRef.current === 'en-IN' ? 'en-US' : 'en-IN';
+          setLastActionStatus('🌐 Speech server re-connecting... (or use Push-to-Talk below)');
+        } else if (event.error === 'audio-capture') {
+          setLastActionStatus('⚠️ Microphone busy in another application.');
+        } else if (event.error !== 'no-speech') {
           console.warn('[Speech Recognition Event]:', event.error);
         }
       };
@@ -679,6 +680,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         isSessionStartingRef.current = false;
         activeRecognitionRef.current = null;
         setIsListening(false);
+        setAudioLevel(0);
 
         // Immediate clean re-arm if voice remains active
         if (isVoiceActiveRef.current && !isPausedRef.current) {
@@ -687,7 +689,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             if (isVoiceActiveRef.current && !isPausedRef.current) {
               startNewListeningSession();
             }
-          }, 80);
+          }, 60);
         }
       };
 
@@ -815,22 +817,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         localStorage.setItem('imd_voice_active', 'false');
       } catch {}
       stopActiveSession();
-      stopMicAudioMeter();
       playTone(320, 0.15);
       setLastActionStatus('Voice turned off');
     } else {
-      // Request mic permission first
-      try {
-        if (typeof navigator?.mediaDevices?.getUserMedia === 'function') {
-          await startMicAudioMeter();
-        }
-      } catch (err) {
-        alert(
-          'Microphone permission is required. Please click the lock or camera icon in your browser address bar and allow Microphone.'
-        );
-        return;
-      }
-
       setIsVoiceActive(true);
       isVoiceActiveRef.current = true;
       try {
@@ -848,28 +837,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   useEffect(() => {
-    const initVoice = async () => {
+    const initVoice = () => {
       const saved = localStorage.getItem('imd_voice_active');
-      if (saved === 'true') {
+      if (saved !== 'false') {
         setIsVoiceActive(true);
         isVoiceActiveRef.current = true;
-        startMicAudioMeter();
         startNewListeningSession();
-        return;
-      }
-
-      // Check if permission already granted
-      if (saved === null && navigator.permissions?.query) {
-        try {
-          const perm = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-          if (perm.state === 'granted') {
-            setIsVoiceActive(true);
-            isVoiceActiveRef.current = true;
-            localStorage.setItem('imd_voice_active', 'true');
-            startMicAudioMeter();
-            startNewListeningSession();
-          }
-        } catch {}
       }
     };
 
@@ -891,6 +864,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         isListening,
         audioLevel,
         supported,
+        currentLanguage,
+        setLanguage,
         speakText,
         playTone,
         pauseListening,
