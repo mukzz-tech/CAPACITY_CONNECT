@@ -28,7 +28,7 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
   const [hasWebcam, setHasWebcam] = useState<boolean>(false);
   const [isSimulatedMode, setIsSimulatedMode] = useState<boolean>(false);
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedCameraMode, setSelectedCameraMode] = useState<string>('auto');
+  const [selectedCameraMode, setSelectedCameraMode] = useState<string>('opencv_python');
   const [simGazeState, setSimGazeState] = useState<'center' | 'away' | 'absent'>('center');
   const [integrityScore, setIntegrityScore] = useState<number>(100.0);
   const [statusMessage, setStatusMessage] = useState<string>('Initializing proctoring camera...');
@@ -36,6 +36,7 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
   const [isNormal, setIsNormal] = useState<boolean>(true);
   const [flagCount, setFlagCount] = useState<number>(0);
   const [isRequesting, setIsRequesting] = useState<boolean>(false);
+  const [openCvStatus, setOpenCvStatus] = useState<any>(null);
 
   useEffect(() => {
     getVideoDevices().then((devs) => {
@@ -43,7 +44,7 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
     }).catch(console.warn);
 
     // Auto-start physical camera on mount
-    startCamera();
+    startCamera('opencv_python');
 
     return () => {
       stopAllCameraTracks();
@@ -94,6 +95,42 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
     }
   }, [attemptId, onIntegrityChange]);
 
+  // Poll Python OpenCV camera status when in OpenCV mode
+  useEffect(() => {
+    if (selectedCameraMode !== 'opencv_python') return;
+
+    let active = true;
+    const checkStatus = async () => {
+      try {
+        const res = await fetch('/api/camera/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!active) return;
+
+        setOpenCvStatus(data);
+        if (data.camera_available) {
+          setHasWebcam(true);
+          const isNorm = data.condition === 'NORMAL';
+          setIsNormal(isNorm);
+          setStatusMessage(data.message || 'OpenCV Hardware Camera Active');
+
+          if (!isNorm) {
+            sendProctorSignal(data.condition, data.message || 'OpenCV Violation Flag');
+          }
+        }
+      } catch (e) {
+        console.warn('OpenCV status polling warning:', e);
+      }
+    };
+
+    checkStatus();
+    const timer = setInterval(checkStatus, 1500);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [selectedCameraMode, sendProctorSignal]);
+
   // Stop camera stream cleanly
   const stopTracks = () => {
     stopAllCameraTracks();
@@ -116,6 +153,16 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
     if (overrideMode !== undefined && streamRef.current) {
       stopAllCameraTracks();
       streamRef.current = null;
+    }
+
+    if (mode === 'opencv_python') {
+      stopAllCameraTracks();
+      streamRef.current = null;
+      setHasWebcam(true);
+      setIsSimulatedMode(false);
+      setStatusMessage('Connected to Python OpenCV Camera');
+      setIsRequesting(false);
+      return;
     }
 
     try {
@@ -264,7 +311,8 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
           }}
           className="flex-1 text-[11px] rounded-lg border border-slate-700 p-1 bg-slate-800 text-slate-200 font-medium"
         >
-          <option value="auto">🌟 Auto-Detect (Real Integrated Camera)</option>
+          <option value="opencv_python">🐍 Python OpenCV Hardware Camera (Zero-Crash Direct Stream)</option>
+          <option value="auto">🌟 Auto-Detect (Real Integrated Camera via WebRTC)</option>
           <option value="simulated">🧑‍💻 OpenCV Live Simulated Feed (Proctoring Test Mode)</option>
           {availableDevices
             .filter((d) => !isVirtualCamera(d.label))
@@ -278,33 +326,55 @@ export const StrictProctor: React.FC<StrictProctorProps> = ({
 
       {/* Video Container */}
       <div className="relative w-full h-44 bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
-        {/* Real video stream */}
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          className={`w-full h-full object-cover transform -scale-x-100 transition-opacity duration-300 ${
-            hasWebcam ? 'opacity-100' : 'opacity-0 absolute'
-          }`}
-        />
-        <canvas
-          ref={canvasRef}
-          className={`absolute inset-0 w-full h-full pointer-events-none object-cover ${
-            hasWebcam ? 'block' : 'hidden'
-          }`}
-        />
-
-        {/* Simulated feed representation */}
-        {isSimulatedMode && !hasWebcam && (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 to-indigo-950/60 p-4 text-center">
-            <div className="w-16 h-16 rounded-full bg-blue-500/20 border-2 border-blue-400 flex items-center justify-center mb-2 relative">
-              <span className="w-3 h-3 rounded-full bg-emerald-400 absolute top-1 right-1 animate-pulse" />
-              <Eye className="w-8 h-8 text-blue-300" />
+        {/* Python OpenCV Direct MJPEG Stream */}
+        {selectedCameraMode === 'opencv_python' ? (
+          <div className="relative w-full h-full bg-slate-950 flex items-center justify-center">
+            <img
+              src="/api/camera/video_feed"
+              alt="Python OpenCV Hardware Camera Stream"
+              className="w-full h-full object-cover"
+              onError={() => {
+                console.warn('OpenCV direct stream unavailable, switching to WebRTC fallback...');
+                setSelectedCameraMode('auto');
+                startCamera('auto');
+              }}
+            />
+            <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/75 backdrop-blur-sm text-[10px] text-white z-10 font-mono">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>🐍 OpenCV 4.14 AI Stream</span>
             </div>
-            <span className="text-xs font-bold text-white">Simulated Candidate Feed</span>
-            <span className="text-[10px] text-emerald-400 font-mono mt-0.5">Face Detected (Centered)</span>
           </div>
+        ) : (
+          <>
+            {/* Real WebRTC video stream */}
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              className={`w-full h-full object-cover transform -scale-x-100 transition-opacity duration-300 ${
+                hasWebcam ? 'opacity-100' : 'opacity-0 absolute'
+              }`}
+            />
+            <canvas
+              ref={canvasRef}
+              className={`absolute inset-0 w-full h-full pointer-events-none object-cover ${
+                hasWebcam ? 'block' : 'hidden'
+              }`}
+            />
+
+            {/* Simulated feed representation */}
+            {isSimulatedMode && !hasWebcam && (
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 to-indigo-950/60 p-4 text-center">
+                <div className="w-16 h-16 rounded-full bg-blue-500/20 border-2 border-blue-400 flex items-center justify-center mb-2 relative">
+                  <span className="w-3 h-3 rounded-full bg-emerald-400 absolute top-1 right-1 animate-pulse" />
+                  <Eye className="w-8 h-8 text-blue-300" />
+                </div>
+                <span className="text-xs font-bold text-white">Simulated Candidate Feed</span>
+                <span className="text-[10px] text-emerald-400 font-mono mt-0.5">Face Detected (Centered)</span>
+              </div>
+            )}
+          </>
         )}
 
         {/* Not Connected / Error overlay */}

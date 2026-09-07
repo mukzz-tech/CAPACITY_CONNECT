@@ -14,6 +14,7 @@ import chatbotRoutes from './routes/chatbotRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import ttsRoutes from './routes/ttsRoutes.js';
 import voiceRoutes from './routes/voiceRoutes.js';
+import cameraRoutes from './routes/cameraRoutes.js';
 
 dotenv.config();
 
@@ -66,6 +67,7 @@ app.use('/api/chatbot', chatbotRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/tts', ttsRoutes);
 app.use('/api/voice', voiceRoutes);
+app.use('/api/camera', cameraRoutes);
 
 // 404 Handler
 app.use((req: Request, res: Response) => {

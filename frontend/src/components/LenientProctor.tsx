@@ -44,7 +44,7 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isRequesting, setIsRequesting] = useState<boolean>(false);
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedCameraMode, setSelectedCameraMode] = useState<string>('auto');
+  const [selectedCameraMode, setSelectedCameraMode] = useState<string>('opencv_python');
   const [autoPauseEnabled, setAutoPauseEnabled] = useState<boolean>(true);
 
   const awayCountRef = useRef<number>(0);
@@ -61,6 +61,15 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
   const startCamera = async (mode = selectedCameraMode) => {
     setIsRequesting(true);
     setCameraError(null);
+
+    if (mode === 'opencv_python') {
+      stopAllCameraTracks();
+      setHasWebcam(true);
+      setIsSimulatedMode(false);
+      setCameraError(null);
+      setIsRequesting(false);
+      return;
+    }
 
     try {
       let stream: MediaStream;
@@ -123,6 +132,27 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
   // Frame attentiveness monitor (~1 check per second)
   useEffect(() => {
     const interval = setInterval(async () => {
+      if (selectedCameraMode === 'opencv_python' && !showNudge) {
+        try {
+          const res = await fetch('/api/camera/status');
+          if (res.ok) {
+            const data = await res.json();
+            if (data.condition === 'NO_FACE_DETECTED') {
+              awayCountRef.current += 1;
+              setIsAttentive(false);
+              if (awayCountRef.current >= 8 && autoPauseEnabled) {
+                setShowNudge(true);
+                if (onPauseRequested) onPauseRequested();
+              }
+            } else {
+              awayCountRef.current = 0;
+              setIsAttentive(true);
+            }
+          }
+        } catch {}
+        return;
+      }
+
       if (hasWebcam && videoRef.current && canvasRef.current && !showNudge) {
         const video = videoRef.current;
         const canvas = canvasRef.current;
@@ -146,7 +176,7 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [hasWebcam, showNudge, onPauseRequested, autoPauseEnabled]);
+  }, [hasWebcam, selectedCameraMode, showNudge, onPauseRequested, autoPauseEnabled]);
 
   const handleDismiss = () => {
     setShowNudge(false);
@@ -195,24 +225,61 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
           <div className="space-y-2">
             {/* Live Camera Feed Container */}
             <div className="relative w-full h-28 bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center shadow-inner">
-              <video
-                ref={videoRef}
-                autoPlay
-                muted
-                playsInline
-                className={`w-full h-full object-cover transform -scale-x-100 ${
-                  hasWebcam ? 'block' : 'hidden'
-                }`}
-              />
-              <canvas ref={canvasRef} className="hidden" />
+              {selectedCameraMode === 'opencv_python' ? (
+                <div className="relative w-full h-full bg-black flex items-center justify-center">
+                  <img
+                    src="/api/camera/video_feed"
+                    alt="Python OpenCV Hardware Camera Stream"
+                    className="w-full h-full object-cover"
+                    onError={() => {
+                      handleDeviceChange('auto');
+                    }}
+                  />
+                  <div className="absolute top-1 left-1 flex items-center gap-1 bg-black/75 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-white font-mono">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>🐍 OpenCV 4.14 Stream</span>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className={`w-full h-full object-cover transform -scale-x-100 ${
+                      hasWebcam ? 'block' : 'hidden'
+                    }`}
+                  />
+                  <canvas ref={canvasRef} className="hidden" />
 
-              {!hasWebcam && (
+                  {hasWebcam && (
+                    <div className="absolute top-1 left-1 flex items-center gap-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-white">
+                      <Video
+                        className={`w-2.5 h-2.5 ${
+                          isSimulatedMode ? 'text-purple-400' : 'text-red-500'
+                        } animate-pulse`}
+                      />
+                      <span>{isSimulatedMode ? 'OpenCV Sim' : 'Live Camera'}</span>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {!hasWebcam && selectedCameraMode !== 'opencv_python' && (
                 <div className="p-2 text-center space-y-1">
                   <VideoOff className="w-5 h-5 text-slate-500 mx-auto" />
                   <span className="text-[10px] text-slate-400 block">
                     {cameraError || 'Camera Loading...'}
                   </span>
                   <div className="flex gap-1 justify-center pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleDeviceChange('opencv_python')}
+                      className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 rounded text-[9px] font-semibold text-white transition flex items-center gap-1"
+                    >
+                      <span>🐍 OpenCV Cam</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => startCamera('auto')}
@@ -231,17 +298,6 @@ export const LenientProctor: React.FC<LenientProctorProps> = ({
                       <span>OpenCV Sim</span>
                     </button>
                   </div>
-                </div>
-              )}
-
-              {hasWebcam && (
-                <div className="absolute top-1 left-1 flex items-center gap-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-white">
-                  <Video
-                    className={`w-2.5 h-2.5 ${
-                      isSimulatedMode ? 'text-purple-400' : 'text-red-500'
-                    } animate-pulse`}
-                  />
-                  <span>{isSimulatedMode ? 'OpenCV Sim' : 'Live Camera'}</span>
                 </div>
               )}
 

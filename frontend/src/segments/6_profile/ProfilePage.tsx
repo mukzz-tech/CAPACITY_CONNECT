@@ -104,7 +104,7 @@ export const ProfilePage: React.FC = () => {
   const [testCameraActive, setTestCameraActive] = useState<boolean>(false);
   const [cameraStatusMsg, setCameraStatusMsg] = useState<string>('');
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedCameraMode, setSelectedCameraMode] = useState<string>('auto');
+  const [selectedCameraMode, setSelectedCameraMode] = useState<string>('opencv_python');
   const [simGazeState, setSimGazeState] = useState<'center' | 'away' | 'absent'>('center');
   const [testAudioPlaying, setTestAudioPlaying] = useState<boolean>(false);
   const [micTesting, setMicTesting] = useState<boolean>(false);
@@ -145,6 +145,12 @@ export const ProfilePage: React.FC = () => {
       testStreamRef.current = null;
     }
 
+    if (mode === 'opencv_python') {
+      setTestCameraActive(true);
+      setCameraStatusMsg('🟢 Python OpenCV Hardware Camera active (Real-Time Face Tracking)');
+      return;
+    }
+
     setCameraStatusMsg('Initializing video stream...');
     try {
       const stream = await getCameraStream(mode === 'auto' ? undefined : mode);
@@ -169,7 +175,7 @@ export const ProfilePage: React.FC = () => {
 
   // Live Computer Vision frame analysis loop for the test camera
   useEffect(() => {
-    if (!testCameraActive || selectedCameraMode === 'simulated') return;
+    if (!testCameraActive || selectedCameraMode === 'simulated' || selectedCameraMode === 'opencv_python') return;
 
     const interval = setInterval(async () => {
       if (testVideoRef.current && testCanvasRef.current) {
@@ -189,6 +195,33 @@ export const ProfilePage: React.FC = () => {
         }
       }
     }, 400);
+
+    return () => clearInterval(interval);
+  }, [testCameraActive, selectedCameraMode]);
+
+  // Live OpenCV Python status poll for ProfilePage
+  useEffect(() => {
+    if (!testCameraActive || selectedCameraMode !== 'opencv_python') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/camera/status');
+        if (res.ok) {
+          const data = await res.json();
+          setVisionCondition(data.condition || 'NORMAL');
+          setVisionGaze(data.gaze_direction || 'center');
+          setCameraStatusMsg(
+            data.condition === 'NORMAL'
+              ? '🟢 OpenCV 4.14: 1 Face Detected & Focused (100% Attentiveness)'
+              : data.condition === 'FACE_TURNED_AWAY'
+              ? `🟡 OpenCV Flag: Face turned away / looking ${data.gaze_direction}`
+              : data.condition === 'MULTIPLE_FACES_DETECTED'
+              ? `🟣 OpenCV Flag: Multiple faces detected (${data.face_count} people)`
+              : '🔴 OpenCV Flag: No face detected in frame'
+          );
+        }
+      } catch {}
+    }, 1000);
 
     return () => clearInterval(interval);
   }, [testCameraActive, selectedCameraMode]);
@@ -669,7 +702,8 @@ export const ProfilePage: React.FC = () => {
                 }}
                 className="w-full text-[11px] rounded-lg border border-slate-300 p-1.5 bg-white font-medium text-slate-800"
               >
-                  <option value="auto">🌟 Auto-Detect (Real Integrated Camera)</option>
+                  <option value="opencv_python">🐍 Python OpenCV Hardware Camera (Zero-Crash Direct Stream)</option>
+                  <option value="auto">🌟 Auto-Detect (Real Integrated Camera via WebRTC)</option>
                   <option value="simulated">🧑‍💻 OpenCV Live Simulated Face Feed (Proctoring Test Mode)</option>
                   {availableDevices
                     .filter((d) => !isVirtualCamera(d.label))
@@ -682,21 +716,41 @@ export const ProfilePage: React.FC = () => {
             </div>
 
             <div className="w-full h-36 bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center relative border border-slate-700">
-              <video
-                ref={testVideoRef}
-                autoPlay
-                muted
-                playsInline
-                className={`w-full h-full object-cover transform -scale-x-100 ${
-                  testCameraActive ? 'block' : 'hidden'
-                }`}
-              />
-              <canvas
-                ref={testCanvasRef}
-                className={`absolute inset-0 w-full h-full pointer-events-none ${
-                  testCameraActive ? 'block' : 'hidden'
-                }`}
-              />
+              {selectedCameraMode === 'opencv_python' && testCameraActive ? (
+                <div className="relative w-full h-full bg-slate-950 flex items-center justify-center">
+                  <img
+                    src="/api/camera/video_feed"
+                    alt="Python OpenCV Hardware Camera Stream"
+                    className="w-full h-full object-cover"
+                    onError={() => {
+                      setSelectedCameraMode('auto');
+                      handleTestWebcam('auto');
+                    }}
+                  />
+                  <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded bg-black/75 backdrop-blur-sm text-[10px] text-white z-10 font-mono">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>🐍 OpenCV 4.14 Stream</span>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <video
+                    ref={testVideoRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className={`w-full h-full object-cover transform -scale-x-100 ${
+                      testCameraActive ? 'block' : 'hidden'
+                    }`}
+                  />
+                  <canvas
+                    ref={testCanvasRef}
+                    className={`absolute inset-0 w-full h-full pointer-events-none ${
+                      testCameraActive ? 'block' : 'hidden'
+                    }`}
+                  />
+                </>
+              )}
 
               {!testCameraActive && (
                 <div className="text-center px-4 space-y-1">
