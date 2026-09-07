@@ -26,6 +26,13 @@ import argparse
 import threading
 from typing import Dict, Any, Optional
 
+# Ensure real-time line buffering on stdout/stderr
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 # Computer Vision (OpenCV)
 try:
     import cv2
@@ -671,10 +678,12 @@ class PythonBackgroundMicListener:
 
     def _listen_loop(self):
         rec = sr.Recognizer()
-        rec.energy_threshold = 280
+        rec.energy_threshold = 140
         rec.dynamic_energy_threshold = True
-        rec.pause_threshold = 0.7
-        rec.non_speaking_duration = 0.4
+        rec.dynamic_energy_adjustment_damping = 0.15
+        rec.dynamic_energy_ratio = 1.4
+        rec.pause_threshold = 0.6
+        rec.non_speaking_duration = 0.3
 
         try:
             mic = sr.Microphone()
@@ -687,11 +696,11 @@ class PythonBackgroundMicListener:
         while self.running:
             try:
                 with mic as source:
-                    rec.adjust_for_ambient_noise(source, duration=0.6)
+                    rec.adjust_for_ambient_noise(source, duration=0.3)
                     while self.running:
                         try:
                             # Listen for phrase with non-blocking timeout
-                            audio = rec.listen(source, timeout=2.5, phrase_time_limit=5.5)
+                            audio = rec.listen(source, timeout=2.0, phrase_time_limit=5.0)
                             if not audio:
                                 continue
 
@@ -726,10 +735,10 @@ class PythonBackgroundMicListener:
                         except sr.WaitTimeoutError:
                             continue
                         except Exception as inner_e:
-                            time.sleep(0.3)
+                            time.sleep(0.2)
             except Exception as outer_e:
                 print(f"[Voice Listener] Mic stream loop exception: {outer_e}")
-                time.sleep(1.0)
+                time.sleep(0.8)
 
 # Global microphone listener instance
 mic_listener = PythonBackgroundMicListener()
@@ -936,11 +945,13 @@ def listen_once_endpoint():
 
     try:
         rec = sr.Recognizer()
-        rec.energy_threshold = 280
+        rec.energy_threshold = 140
         rec.dynamic_energy_threshold = True
-        rec.pause_threshold = 0.8
+        rec.dynamic_energy_adjustment_damping = 0.15
+        rec.dynamic_energy_ratio = 1.4
+        rec.pause_threshold = 0.6
         with sr.Microphone() as source:
-            rec.adjust_for_ambient_noise(source, duration=0.4)
+            rec.adjust_for_ambient_noise(source, duration=0.25)
             audio = rec.listen(source, timeout=4.0, phrase_time_limit=5.5)
 
         transcript = None

@@ -125,6 +125,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setLanguage = (lang: string) => {
     setCurrentLanguageState(lang);
     recognitionLangRef.current = lang;
+    webSpeechBlockedRef.current = false;
     stopActiveSession();
     if (isVoiceActiveRef.current && !isPausedRef.current) {
       startNewListeningSession();
@@ -137,6 +138,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const isPausedRef = useRef<boolean>(false);
   const restartTimeoutRef = useRef<any>(null);
   const lastCmdTimeRef = useRef<number>(0);
+  const webSpeechBlockedRef = useRef<boolean>(false);
 
   // Audio Stream & VU Meter refs
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -488,22 +490,16 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  // Record audio via direct hardware mic or PCM WAV fallback
+  // Record audio via high-fidelity browser WAV capture, with direct Python hardware mic fallback
   const recordAndProcessWithPython = async (
     durationMs = 3200
   ): Promise<{ transcript: string; command: any } | null> => {
-    // 1. Try direct hardware microphone capture in Python first
-    const directRes = await listenWithPythonHardwareMic();
-    if (directRes && directRes.transcript) {
-      return directRes;
-    }
-
-    // 2. Fallback: browser audio recording
     pauseListening();
     playTone(580, 0.12);
-    setLastActionStatus('🎙️ Listening with browser audio fallback...');
+    setLastActionStatus('🎙️ Listening... Speak now!');
 
     try {
+      // 1. Primary: High-fidelity 16kHz PCM WAV capture via browser Web Audio API
       const session = await startWavRecording({
         onLevel: (lvl) => setAudioLevel(lvl),
       });
@@ -523,10 +519,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       resumeListening();
       return result;
     } catch (err: any) {
-      console.warn('Python voice recording error:', err);
-      setLastActionStatus('Voice input error');
+      console.warn('[Voice Capture] Browser audio capture unavailable, falling back to Python hardware mic:', err.message);
+      // 2. Secondary fallback: Direct hardware microphone capture in Python
+      const directRes = await listenWithPythonHardwareMic();
       resumeListening();
-      return null;
+      return directRes;
     }
   };
 
@@ -951,6 +948,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setAudioLevel(0);
 
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          webSpeechBlockedRef.current = true;
           setLastActionStatus('🐍 Python AI Voice Active (Listening via Hardware Realtek Mic)');
           return;
         }
@@ -971,14 +969,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsListening(false);
         setAudioLevel(0);
 
-        // Immediate clean re-arm if voice remains active
-        if (isVoiceActiveRef.current && !isPausedRef.current) {
+        // Immediate clean re-arm only if voice is active and web speech is not permission-blocked
+        if (isVoiceActiveRef.current && !isPausedRef.current && !webSpeechBlockedRef.current) {
           if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
           restartTimeoutRef.current = setTimeout(() => {
-            if (isVoiceActiveRef.current && !isPausedRef.current) {
+            if (isVoiceActiveRef.current && !isPausedRef.current && !webSpeechBlockedRef.current) {
               startNewListeningSession();
             }
-          }, 60);
+          }, 350);
         }
       };
 
@@ -1126,6 +1124,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } else {
       setIsVoiceActive(true);
       isVoiceActiveRef.current = true;
+      webSpeechBlockedRef.current = false;
       try {
         localStorage.setItem('imd_voice_active', 'true');
       } catch {}
