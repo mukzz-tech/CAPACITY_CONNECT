@@ -31,6 +31,8 @@ export const VoiceAssistantWidget: React.FC = () => {
     captureVoiceInput,
     simulateVoiceInput,
     playTone,
+    pythonVoiceOnline,
+    recordAndProcessWithPython,
   } = useVoice();
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [simulationInput, setSimulationInput] = useState<string>('');
@@ -47,9 +49,14 @@ export const VoiceAssistantWidget: React.FC = () => {
     setIsCapturing(true);
     playTone(580, 0.12);
     try {
-      const text = await captureVoiceInput('Listening for your command...');
-      if (text) {
-        simulateVoiceInput(text);
+      // First attempt direct high-precision Python speech recognition
+      const pythonRes = await recordAndProcessWithPython(3500);
+      if (!pythonRes || !pythonRes.transcript) {
+        // Fallback to browser capture
+        const text = await captureVoiceInput('Listening for your command...');
+        if (text) {
+          simulateVoiceInput(text);
+        }
       }
     } finally {
       setIsCapturing(false);
@@ -67,7 +74,13 @@ export const VoiceAssistantWidget: React.FC = () => {
           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-amber-400" />
-              <span className="text-xs font-bold text-slate-100">Voice Navigation & Universal Auto-Fill</span>
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-slate-100">Voice Navigation & Universal Auto-Fill</span>
+                <span className="text-[9px] font-mono text-emerald-400 flex items-center gap-1">
+                  <span className={`w-1.5 h-1.5 rounded-full ${pythonVoiceOnline ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                  {pythonVoiceOnline ? '🐍 Python Speech Engine: Active' : '⚡ Python Engine: Connecting...'}
+                </span>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <select
@@ -89,10 +102,10 @@ export const VoiceAssistantWidget: React.FC = () => {
             <div className="space-y-0.5">
               <span className="text-xs font-bold text-white flex items-center gap-1.5">
                 <Mic className="w-3.5 h-3.5 text-blue-400" />
-                <span>Push-to-Talk Trigger</span>
+                <span>Python Voice Engine</span>
               </span>
               <p className="text-[10px] text-slate-300">
-                Click to record one spoken command or dictation phrase.
+                Click to record spoken command or dictation for Python NLP.
               </p>
             </div>
             <button
@@ -106,7 +119,7 @@ export const VoiceAssistantWidget: React.FC = () => {
               }`}
             >
               <Mic className={`w-4 h-4 ${isCapturing ? 'animate-bounce' : ''}`} />
-              <span>{isCapturing ? 'Listening Now...' : 'Click to Speak'}</span>
+              <span>{isCapturing ? 'Listening (Python)...' : 'Click to Speak'}</span>
             </button>
           </div>
 

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { startWavRecording } from '../utils/wavRecorder';
 
 export interface VoiceContextType {
   isVoiceActive: boolean;
@@ -17,6 +18,11 @@ export interface VoiceContextType {
   resumeListening: () => void;
   captureVoiceInput: (promptMessage?: string) => Promise<string>;
   simulateVoiceInput: (phrase: string) => boolean;
+  pythonVoiceOnline: boolean;
+  checkPythonStatus: () => Promise<boolean>;
+  transcribeAudioWithPython: (audioBlob: Blob, language?: string) => Promise<{ transcript: string; command: any } | null>;
+  recordAndProcessWithPython: (durationMs?: number) => Promise<{ transcript: string; command: any } | null>;
+  executeParsedCommand: (cmd: any) => boolean;
 }
 
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
@@ -110,6 +116,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [lastActionStatus, setLastActionStatus] = useState<string>('');
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const [supported, setSupported] = useState<boolean>(true);
+  const [pythonVoiceOnline, setPythonVoiceOnline] = useState<boolean>(false);
 
   const [currentLanguage, setCurrentLanguageState] = useState<string>('en-IN');
   const recognitionLangRef = useRef<string>('en-IN');
@@ -239,6 +246,198 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audioContextRef.current = null;
     }
     setAudioLevel(0);
+  };
+
+  // Poll Python Voice Service status
+  const checkPythonStatus = async (): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/voice/status');
+      if (res.ok) {
+        const data = await res.json();
+        const isOnline = !!data.online;
+        setPythonVoiceOnline(isOnline);
+        return isOnline;
+      }
+    } catch {
+      setPythonVoiceOnline(false);
+    }
+    return false;
+  };
+
+  // Centralized command dispatcher from Python NLP or local matcher
+  const executeParsedCommand = (cmd: any): boolean => {
+    if (!cmd || !cmd.action) return false;
+    const now = Date.now();
+    lastCmdTimeRef.current = now;
+
+    if (cmd.tone) playTone(cmd.tone, 0.12);
+
+    if (cmd.action === 'NAVIGATE' && cmd.target) {
+      setLastActionStatus(cmd.description || `Navigating to ${cmd.target}...`);
+      navigate(cmd.target);
+      return true;
+    }
+
+    if (cmd.action === 'CAMERA_TEST') {
+      setLastActionStatus(cmd.description || 'Opening Camera Diagnostics...');
+      navigate('/profile');
+      window.dispatchEvent(new CustomEvent('imd-voice-test-camera'));
+      return true;
+    }
+
+    if (cmd.action === 'VIDEO_PLAY') {
+      setLastActionStatus(cmd.description || 'Playing lecture video...');
+      window.dispatchEvent(new CustomEvent('imd-voice-video-play'));
+      return true;
+    }
+
+    if (cmd.action === 'VIDEO_PAUSE') {
+      setLastActionStatus(cmd.description || 'Paused lecture video');
+      window.dispatchEvent(new CustomEvent('imd-voice-video-pause'));
+      return true;
+    }
+
+    if (cmd.action === 'READ_ALOUD') {
+      setLastActionStatus(cmd.description || 'Reading notes aloud...');
+      window.dispatchEvent(new CustomEvent('imd-voice-read-aloud'));
+      return true;
+    }
+
+    if (cmd.action === 'STOP') {
+      setLastActionStatus(cmd.description || 'Audio & Video stopped');
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      window.dispatchEvent(new CustomEvent('imd-voice-stop'));
+      window.dispatchEvent(new CustomEvent('imd-voice-video-pause'));
+      return true;
+    }
+
+    if (cmd.action === 'ASSESSMENT_SUBMIT') {
+      setLastActionStatus(cmd.description || 'Submitting Assessment...');
+      window.dispatchEvent(new CustomEvent('imd-voice-submit'));
+      return true;
+    }
+
+    if (cmd.action === 'ASSESSMENT_NEXT') {
+      setLastActionStatus(cmd.description || 'Next Question');
+      window.dispatchEvent(new CustomEvent('imd-voice-next-question'));
+      return true;
+    }
+
+    if (cmd.action === 'ASSESSMENT_PREV') {
+      setLastActionStatus(cmd.description || 'Previous Question');
+      window.dispatchEvent(new CustomEvent('imd-voice-prev-question'));
+      return true;
+    }
+
+    if (cmd.action === 'OPTION_SELECT' && cmd.option) {
+      setLastActionStatus(cmd.description || `Selected Option ${cmd.option}`);
+      window.dispatchEvent(new CustomEvent('imd-voice-option-select', { detail: cmd.option }));
+      return true;
+    }
+
+    if (cmd.action === 'CLEAR_INPUT') {
+      fillActiveInput('');
+      setLastActionStatus(cmd.description || 'Cleared Input Box');
+      return true;
+    }
+
+    if (cmd.action === 'FILL_INPUT' && cmd.fill_text !== undefined) {
+      const filled = fillActiveInput(cmd.fill_text);
+      setLastActionStatus(cmd.description || `Filled box: "${cmd.fill_text}"`);
+      window.dispatchEvent(new CustomEvent('imd-voice-general', { detail: cmd.fill_text }));
+      return filled;
+    }
+
+    if (cmd.action === 'GENERAL_INPUT' && cmd.fill_text) {
+      const filled = fillActiveInput(cmd.fill_text);
+      if (filled) {
+        setLastActionStatus(`Filled box: "${cmd.fill_text}"`);
+      } else {
+        setLastActionStatus(`Heard: "${cmd.fill_text}"`);
+      }
+      window.dispatchEvent(new CustomEvent('imd-voice-general', { detail: cmd.fill_text }));
+      return filled;
+    }
+
+    return false;
+  };
+
+  // Send WAV Blob to Python Speech Recognition module
+  const transcribeAudioWithPython = async (
+    audioBlob: Blob,
+    language = recognitionLangRef.current || 'en-IN'
+  ): Promise<{ transcript: string; command: any } | null> => {
+    try {
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.wav');
+      formData.append('language', language);
+
+      let response = await fetch(`/api/voice/transcribe?language=${encodeURIComponent(language)}`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        try {
+          response = await fetch(`http://127.0.0.1:5005/transcribe?language=${encodeURIComponent(language)}`, {
+            method: 'POST',
+            body: formData,
+          });
+        } catch {}
+      }
+
+      const data = await response.json();
+      if (data.success && data.transcript) {
+        setLastRecognizedPhrase(data.transcript);
+        if (data.command) {
+          executeParsedCommand(data.command);
+        } else {
+          processVoiceCommand(data.transcript);
+        }
+        return data;
+      } else if (data.error) {
+        setLastActionStatus(data.error);
+      }
+      return null;
+    } catch (err: any) {
+      console.warn('[Python Voice Transcription Error]:', err.message);
+      return null;
+    }
+  };
+
+  // Record audio via PCM WAV and process with Python Voice Service
+  const recordAndProcessWithPython = async (
+    durationMs = 3200
+  ): Promise<{ transcript: string; command: any } | null> => {
+    pauseListening();
+    playTone(580, 0.12);
+    setLastActionStatus('🎙️ Listening with Python AI Voice Module...');
+
+    try {
+      const session = await startWavRecording({
+        onLevel: (lvl) => setAudioLevel(lvl),
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, durationMs));
+
+      setLastActionStatus('⚡ Analyzing speech with Python engine...');
+      const wavBlob = await session.stop();
+
+      if (!wavBlob) {
+        setLastActionStatus('No audio detected');
+        resumeListening();
+        return null;
+      }
+
+      const result = await transcribeAudioWithPython(wavBlob);
+      resumeListening();
+      return result;
+    } catch (err: any) {
+      console.warn('Python voice recording error:', err);
+      setLastActionStatus('Voice input error');
+      resumeListening();
+      return null;
+    }
   };
 
   // Core Command & Box-Filling Router
@@ -740,8 +939,23 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  // Single-phrase capture utility
-  const captureVoiceInput = (promptMessage?: string): Promise<string> => {
+  // Single-phrase capture utility powered by Python Speech Module
+  const captureVoiceInput = async (promptMessage?: string): Promise<string> => {
+    if (promptMessage) {
+      setLastActionStatus(promptMessage);
+    }
+
+    // Try Python voice engine with direct 16-bit PCM WAV recording
+    try {
+      const pythonResult = await recordAndProcessWithPython(3600);
+      if (pythonResult && pythonResult.transcript) {
+        return pythonResult.transcript;
+      }
+    } catch (e) {
+      console.warn('Python capture attempt fallback:', e);
+    }
+
+    // Fallback: Browser Web Speech API
     return new Promise((resolve) => {
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (!SR) {
@@ -760,13 +974,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         resolve(val);
       };
 
-      const safetyTimer = setTimeout(() => safeResolve(''), 9000);
+      const safetyTimer = setTimeout(() => safeResolve(''), 8000);
 
       try {
         playTone(580, 0.12);
 
         const rec = new SR();
-        rec.lang = 'en-IN';
+        rec.lang = recognitionLangRef.current || 'en-IN';
         rec.continuous = false;
         rec.interimResults = true;
 
@@ -787,7 +1001,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         rec.onend = () => {
           clearTimeout(safetyTimer);
-          if (captured) playTone(680, 0.12);
+          if (captured) {
+            playTone(680, 0.12);
+            processVoiceCommand(captured);
+          }
           safeResolve(captured);
         };
 
@@ -847,8 +1064,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     initVoice();
+    checkPythonStatus();
+    const statusInterval = setInterval(checkPythonStatus, 25000);
 
     return () => {
+      clearInterval(statusInterval);
       stopActiveSession();
       stopMicAudioMeter();
     };
@@ -872,6 +1092,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         resumeListening,
         captureVoiceInput,
         simulateVoiceInput,
+        pythonVoiceOnline,
+        checkPythonStatus,
+        transcribeAudioWithPython,
+        recordAndProcessWithPython,
+        executeParsedCommand,
       }}
     >
       {children}

@@ -13,6 +13,7 @@ import proctoringRoutes from './routes/proctoringRoutes.js';
 import chatbotRoutes from './routes/chatbotRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import ttsRoutes from './routes/ttsRoutes.js';
+import voiceRoutes from './routes/voiceRoutes.js';
 
 dotenv.config();
 
@@ -64,6 +65,7 @@ app.use('/api/proctoring', proctoringRoutes);
 app.use('/api/chatbot', chatbotRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/tts', ttsRoutes);
+app.use('/api/voice', voiceRoutes);
 
 // 404 Handler
 app.use((req: Request, res: Response) => {
