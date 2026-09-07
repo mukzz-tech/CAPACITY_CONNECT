@@ -33,6 +33,7 @@ export const VoiceAssistantWidget: React.FC = () => {
     playTone,
     pythonVoiceOnline,
     recordAndProcessWithPython,
+    listenWithPythonHardwareMic,
   } = useVoice();
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [simulationInput, setSimulationInput] = useState<string>('');
@@ -49,10 +50,10 @@ export const VoiceAssistantWidget: React.FC = () => {
     setIsCapturing(true);
     playTone(580, 0.12);
     try {
-      // First attempt direct high-precision Python speech recognition
-      const pythonRes = await recordAndProcessWithPython(3500);
+      // 1. Direct hardware microphone capture via Python
+      const pythonRes = await listenWithPythonHardwareMic();
       if (!pythonRes || !pythonRes.transcript) {
-        // Fallback to browser capture
+        // 2. Fallback to browser capture
         const text = await captureVoiceInput('Listening for your command...');
         if (text) {
           simulateVoiceInput(text);

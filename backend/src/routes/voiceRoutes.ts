@@ -272,4 +272,23 @@ router.post('/listener-control', async (req: Request, res: Response) => {
   }
 });
 
+// 6. Direct Hardware Microphone Single-Phrase Capture
+router.post('/listen-once', async (req: Request, res: Response) => {
+  try {
+    const isHealthy = await ensurePythonService();
+    if (isHealthy) {
+      const upstream = await fetch(`${PYTHON_SERVICE_URL}/listen_once`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body || {}),
+      });
+      const data = await upstream.json();
+      return res.status(upstream.status).json(data);
+    }
+    return res.status(503).json({ success: false, error: 'Python AI voice microservice is offline.' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;

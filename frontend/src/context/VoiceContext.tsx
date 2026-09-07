@@ -22,6 +22,7 @@ export interface VoiceContextType {
   checkPythonStatus: () => Promise<boolean>;
   transcribeAudioWithPython: (audioBlob: Blob, language?: string) => Promise<{ transcript: string; command: any } | null>;
   recordAndProcessWithPython: (durationMs?: number) => Promise<{ transcript: string; command: any } | null>;
+  listenWithPythonHardwareMic: () => Promise<{ transcript: string; command: any } | null>;
   executeParsedCommand: (cmd: any) => boolean;
 }
 
@@ -447,13 +448,60 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  // Record audio via PCM WAV and process with Python Voice Service
+  // Directly triggers Python's native hardware microphone single-phrase capture
+  const listenWithPythonHardwareMic = async (): Promise<{ transcript: string; command: any } | null> => {
+    pauseListening();
+    playTone(580, 0.12);
+    setLastActionStatus('🎙️ Listening directly through hardware microphone (Python)...');
+    setAudioLevel(90);
+
+    try {
+      const res = await fetch('/api/voice/listen-once', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language: recognitionLangRef.current || 'en-IN' }),
+      });
+
+      const data = await res.json();
+      setAudioLevel(0);
+      resumeListening();
+
+      if (res.ok && data.success && data.transcript) {
+        setLastRecognizedPhrase(data.transcript);
+        if (data.command) {
+          executeParsedCommand(data.command);
+        } else {
+          processVoiceCommand(data.transcript);
+        }
+        return data;
+      } else {
+        const errMsg = data.error || 'No speech detected';
+        setLastActionStatus(errMsg);
+        return null;
+      }
+    } catch (err: any) {
+      setAudioLevel(0);
+      resumeListening();
+      console.warn('[Python Direct Mic Error]:', err.message);
+      setLastActionStatus('Microphone capture error');
+      return null;
+    }
+  };
+
+  // Record audio via direct hardware mic or PCM WAV fallback
   const recordAndProcessWithPython = async (
     durationMs = 3200
   ): Promise<{ transcript: string; command: any } | null> => {
+    // 1. Try direct hardware microphone capture in Python first
+    const directRes = await listenWithPythonHardwareMic();
+    if (directRes && directRes.transcript) {
+      return directRes;
+    }
+
+    // 2. Fallback: browser audio recording
     pauseListening();
     playTone(580, 0.12);
-    setLastActionStatus('🎙️ Listening with Python AI Voice Module...');
+    setLastActionStatus('🎙️ Listening with browser audio fallback...');
 
     try {
       const session = await startWavRecording({
@@ -1149,6 +1197,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         checkPythonStatus,
         transcribeAudioWithPython,
         recordAndProcessWithPython,
+        listenWithPythonHardwareMic,
         executeParsedCommand,
       }}
     >

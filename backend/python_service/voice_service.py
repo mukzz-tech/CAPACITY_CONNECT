@@ -923,6 +923,60 @@ def voice_listener_control_endpoint():
         "error": mic_listener.mic_error
     })
 
+@app.route("/listen_once", methods=["POST", "GET", "OPTIONS"])
+def listen_once_endpoint():
+    """Natively records a single spoken phrase directly from the hardware microphone."""
+    if request.method == "OPTIONS":
+        return "", 204
+
+    lang = request.args.get("language") or "en-IN"
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        lang = data.get("language", lang)
+
+    try:
+        rec = sr.Recognizer()
+        rec.energy_threshold = 280
+        rec.dynamic_energy_threshold = True
+        rec.pause_threshold = 0.8
+        with sr.Microphone() as source:
+            rec.adjust_for_ambient_noise(source, duration=0.4)
+            audio = rec.listen(source, timeout=4.0, phrase_time_limit=5.5)
+
+        transcript = None
+        for l in [lang, "en-IN", "en-US", "hi-IN"]:
+            try:
+                transcript = rec.recognize_google(audio, language=l)
+                if transcript and transcript.strip():
+                    break
+            except Exception:
+                continue
+
+        if transcript and transcript.strip():
+            transcript = transcript.strip()
+            cmd = parse_voice_command(transcript)
+            mic_listener.push_event(transcript, source="listen_once")
+            return jsonify({
+                "success": True,
+                "transcript": transcript,
+                "command": cmd
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "No clear speech recognized. Please speak into your microphone."
+            }), 422
+    except sr.WaitTimeoutError:
+        return jsonify({
+            "success": False,
+            "error": "Listening timed out. No speech detected."
+        }), 408
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Microphone error: {str(e)}"
+        }), 500
+
 @app.route("/command", methods=["POST", "OPTIONS"])
 def command_endpoint():
     if request.method == "OPTIONS":
