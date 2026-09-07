@@ -341,6 +341,27 @@ export const AssessmentPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Admin Inspection Mode Notice */}
+      {user?.role === 'ADMIN' && (
+        <div className="p-4 bg-purple-50 border border-purple-200 rounded-2xl flex flex-col sm:flex-row justify-between items-center gap-3 text-purple-900">
+          <div className="flex items-center gap-3">
+            <ShieldCheck className="w-6 h-6 text-purple-700 shrink-0" />
+            <div>
+              <h3 className="text-sm font-bold">Admin Assessment Inspection Mode</h3>
+              <p className="text-xs text-purple-700">
+                You are inspecting the lesson question bank as an IMD HQ Administrator. Strict proctoring deductions and candidate attempt submissions are disabled for central oversight.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/admin"
+            className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold whitespace-nowrap shadow-sm"
+          >
+            Admin Console
+          </Link>
+        </div>
+      )}
+
       {/* Results View (If already submitted) */}
       {results && (
         <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-md space-y-6">
@@ -633,38 +654,75 @@ export const AssessmentPage: React.FC = () => {
               </div>
             ))}
 
-            {/* Submit Button */}
+            {/* Submit / Admin Action Box */}
             <div className="pt-4">
-              <button
-                onClick={handleSubmitAttempt}
-                disabled={submitting}
-                className="w-full py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
-              >
-                {submitting ? 'Auto-Grading Submission...' : 'Submit Assessment for Instant Evaluation'}
-              </button>
+              {user?.role === 'ADMIN' ? (
+                <div className="p-4 bg-purple-50 rounded-2xl border border-purple-200 text-center space-y-2">
+                  <p className="text-xs text-purple-900 font-medium">
+                    Central Oversight: Candidate examination submissions and auto-grading scores are recorded only for enrolled Trainees.
+                  </p>
+                  <Link
+                    to="/admin"
+                    className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition shadow-sm"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Return to Admin Console (Proctoring Queue)</span>
+                  </Link>
+                </div>
+              ) : (
+                <button
+                  onClick={handleSubmitAttempt}
+                  disabled={submitting}
+                  className="w-full py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
+                >
+                  {submitting ? 'Auto-Grading Submission...' : 'Submit Assessment for Instant Evaluation'}
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Right Column: Strict OpenCV Proctoring Monitor (Section 11) */}
+          {/* Right Column: Strict OpenCV Proctoring Monitor / Admin Rubric */}
           <div className="space-y-6">
             <div className="sticky top-20">
-              <StrictProctor
-                attemptId={attemptId}
-                onIntegrityChange={(score) => setIntegrityScore(score)}
-              />
-
-              <div className="mt-4 p-4 bg-white border border-slate-200 rounded-xl text-xs text-slate-500 space-y-2 shadow-sm">
-                <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                  <ShieldCheck className="w-4 h-4 text-blue-600" />
-                  <span>Integrity Rules (Section 11)</span>
+              {user?.role === 'ADMIN' ? (
+                <div className="p-5 bg-white border border-purple-200 rounded-2xl shadow-sm space-y-3 text-xs">
+                  <div className="flex items-center gap-2 text-purple-800 font-bold">
+                    <ShieldCheck className="w-5 h-5 text-purple-600" />
+                    <span>Proctoring Rubric & Standards</span>
+                  </div>
+                  <p className="text-slate-600 text-xs leading-relaxed">
+                    During live trainee examinations, the unified OpenCV vision engine evaluates attentiveness and logs violations:
+                  </p>
+                  <ul className="list-disc pl-4 space-y-1 text-slate-600 text-[11px]">
+                    <li>No face detected (&gt;3s): -10 pts</li>
+                    <li>Face turned away (&gt;3s): -5 pts</li>
+                    <li>Multiple faces in frame: -15 pts</li>
+                  </ul>
+                  <p className="text-[11px] text-purple-700 pt-2 border-t border-purple-100 font-medium">
+                    Violations below 100% integrity appear in the <strong>Admin Console Proctoring Review Queue</strong>.
+                  </p>
                 </div>
-                <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-600">
-                  <li>No face detected (&gt;3s): -10 pts</li>
-                  <li>Face turned away (&gt;3s): -5 pts</li>
-                  <li>Multiple faces in frame: -15 pts</li>
-                  <li>No video leaves your browser.</li>
-                </ul>
-              </div>
+              ) : (
+                <>
+                  <StrictProctor
+                    attemptId={attemptId}
+                    onIntegrityChange={(score) => setIntegrityScore(score)}
+                  />
+
+                  <div className="mt-4 p-4 bg-white border border-slate-200 rounded-xl text-xs text-slate-500 space-y-2 shadow-sm">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                      <ShieldCheck className="w-4 h-4 text-blue-600" />
+                      <span>Integrity Rules (Section 11)</span>
+                    </div>
+                    <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-600">
+                      <li>No face detected (&gt;3s): -10 pts</li>
+                      <li>Face turned away (&gt;3s): -5 pts</li>
+                      <li>Multiple faces in frame: -15 pts</li>
+                      <li>No video leaves your browser.</li>
+                    </ul>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

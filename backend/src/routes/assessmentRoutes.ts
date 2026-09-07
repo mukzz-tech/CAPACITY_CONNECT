@@ -122,6 +122,11 @@ router.post('/:id/attempt', authenticate, async (req: AuthenticatedRequest, res:
     const userId = req.user!.userId;
     const { submissions, integrityScore } = req.body; // array of { questionId, answer, isVoiceAnswer }
 
+    if (req.user?.role === UserRole.ADMIN || req.user?.role === UserRole.TRAINER) {
+      res.status(403).json({ error: 'Only trainees may submit assessment attempts. Administrators and Trainers have oversight and review access only.' });
+      return;
+    }
+
     if (!submissions || !Array.isArray(submissions)) {
       res.status(400).json({ error: 'Submissions array is required.' });
       return;

@@ -143,6 +143,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
+  // Python Voice Service Polling refs
+  const lastPolledIdRef = useRef<number>(0);
+  const isPollingRef = useRef<boolean>(false);
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -262,6 +266,44 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setPythonVoiceOnline(false);
     }
     return false;
+  };
+
+  // Continuous background poller querying Python's physical microphone listener
+  const pollPythonVoiceService = async () => {
+    if (!isVoiceActiveRef.current || isPausedRef.current || isPollingRef.current) return;
+    isPollingRef.current = true;
+    try {
+      const res = await fetch(`/api/voice/poll?since=${lastPolledIdRef.current}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.latest_id !== undefined) {
+          if (lastPolledIdRef.current === 0) {
+            // First run: synchronize to latest event so we don't replay stale commands
+            lastPolledIdRef.current = data.latest_id;
+          }
+        }
+        if (data.has_command && data.event) {
+          const { id, transcript, command } = data.event;
+          if (id > lastPolledIdRef.current) {
+            lastPolledIdRef.current = id;
+            console.log('[Python Direct Mic Heard]:', transcript, command);
+            setLastRecognizedPhrase(transcript);
+            setAudioLevel(95);
+            setTimeout(() => setAudioLevel(0), 1200);
+
+            if (command) {
+              executeParsedCommand(command);
+            } else {
+              processVoiceCommand(transcript);
+            }
+          }
+        }
+      }
+    } catch {
+      // Background network blip or service reload
+    } finally {
+      isPollingRef.current = false;
+    }
   };
 
   // Centralized command dispatcher from Python NLP or local matcher
@@ -861,13 +903,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setAudioLevel(0);
 
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-          setLastActionStatus('⚠️ Mic blocked. Click lock in address bar to Allow.');
+          setLastActionStatus('🐍 Python AI Voice Active (Listening via Hardware Realtek Mic)');
           return;
         }
 
         if (event.error === 'network') {
           recognitionLangRef.current = recognitionLangRef.current === 'en-IN' ? 'en-US' : 'en-IN';
-          setLastActionStatus('🌐 Speech server re-connecting... (or use Push-to-Talk below)');
+          setLastActionStatus('🐍 Python AI Voice Active (Listening via Hardware Realtek Mic)');
         } else if (event.error === 'audio-capture') {
           setLastActionStatus('⚠️ Microphone busy in another application.');
         } else if (event.error !== 'no-speech') {
@@ -1017,16 +1059,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const toggleVoice = async () => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      alert(
-        'Speech Recognition is not available in this browser. Please use Google Chrome or Microsoft Edge.'
-      );
-      return;
-    }
-
     if (isVoiceActive) {
       setIsVoiceActive(false);
       isVoiceActiveRef.current = false;
@@ -1036,6 +1068,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       stopActiveSession();
       playTone(320, 0.15);
       setLastActionStatus('Voice turned off');
+
+      // Pause Python background microphone listener
+      fetch('/api/voice/listener-control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'stop' }),
+      }).catch(() => {});
     } else {
       setIsVoiceActive(true);
       isVoiceActiveRef.current = true;
@@ -1046,9 +1085,16 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Instant pleasant ascending chime: signals LIVE listening without blocking speech
       playTone(520, 0.1);
       setTimeout(() => playTone(780, 0.15), 120);
-      setLastActionStatus('🎙️ Listening for commands or box-filling...');
+      setLastActionStatus('🎙️ Listening for commands or box-filling (Python AI + Mic active)...');
 
-      // Start recognition immediately!
+      // Start Python background microphone listener
+      fetch('/api/voice/listener-control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start' }),
+      }).catch(() => {});
+
+      // Start browser recognition session as additional parallel channel if supported
       startNewListeningSession();
     }
   };
@@ -1059,6 +1105,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (saved !== 'false') {
         setIsVoiceActive(true);
         isVoiceActiveRef.current = true;
+        fetch('/api/voice/listener-control', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'start' }),
+        }).catch(() => {});
         startNewListeningSession();
       }
     };
@@ -1066,9 +1117,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     initVoice();
     checkPythonStatus();
     const statusInterval = setInterval(checkPythonStatus, 25000);
+    const pollInterval = setInterval(pollPythonVoiceService, 550);
 
     return () => {
       clearInterval(statusInterval);
+      clearInterval(pollInterval);
       stopActiveSession();
       stopMicAudioMeter();
     };

@@ -221,7 +221,7 @@ Doppler Weather Radar enables severe weather nowcasting across all IMD coastal a
           <span className="text-slate-800 font-semibold">{selectedLesson?.title}</span>
         </div>
 
-        {selectedLesson?.assessments && selectedLesson.assessments.length > 0 && (
+        {selectedLesson?.assessments && selectedLesson.assessments.length > 0 && user?.role === 'TRAINEE' && (
           <Link
             to={`/assessments/${selectedLesson.assessments[0].id}`}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md shadow-emerald-600/20 transition"
@@ -230,6 +230,13 @@ Doppler Weather Radar enables severe weather nowcasting across all IMD coastal a
             <span>Take Lesson Assessment</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </Link>
+        )}
+
+        {selectedLesson?.assessments && selectedLesson.assessments.length > 0 && user?.role === 'ADMIN' && (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-100 text-purple-800 text-xs font-semibold border border-purple-200">
+            <Award className="w-4 h-4 text-purple-600" />
+            <span>Lesson Assessment: {selectedLesson.assessments[0].title}</span>
+          </div>
         )}
       </div>
 

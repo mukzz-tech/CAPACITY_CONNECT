@@ -100,8 +100,16 @@ export async function startWavRecording(options?: {
   });
 
   const audioCtx = new AudioCtx();
+  if (audioCtx.state === 'suspended') {
+    try {
+      await audioCtx.resume();
+    } catch {}
+  }
+
   const source = audioCtx.createMediaStreamSource(stream);
   const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+  const muteGain = audioCtx.createGain();
+  muteGain.gain.value = 0; // Prevent feedback screech through speakers
 
   const audioChunks: Float32Array[] = [];
   let isStopped = false;
@@ -126,7 +134,8 @@ export async function startWavRecording(options?: {
   };
 
   source.connect(processor);
-  processor.connect(audioCtx.destination);
+  processor.connect(muteGain);
+  muteGain.connect(audioCtx.destination);
 
   const cleanup = () => {
     isStopped = true;

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
   ShieldCheck,
@@ -289,6 +290,13 @@ export const AdminConsolePage: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <Link
+                        to={`/courses/${c.id}`}
+                        className="px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold text-xs transition border border-purple-200 flex items-center gap-1"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Inspect Curriculum</span>
+                      </Link>
                       <button
                         onClick={() => handlePublishCourse(c.id, 'PUBLISH')}
                         className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-sm"

@@ -233,4 +233,43 @@ router.post('/command', async (req: Request, res: Response) => {
   }
 });
 
+// 4. Poll Latest Voice Event (Background Hardware Microphone & Transcriptions)
+router.get('/poll', async (req: Request, res: Response) => {
+  try {
+    const since = req.query.since || '0';
+    const isHealthy = await ensurePythonService();
+    if (isHealthy) {
+      const upstream = await fetch(`${PYTHON_SERVICE_URL}/voice_poll?since=${encodeURIComponent(String(since))}`);
+      if (upstream.ok) {
+        const data = await upstream.json();
+        return res.json(data);
+      }
+    }
+    return res.json({ has_command: false, latest_id: 0, mic_active: false });
+  } catch (err: any) {
+    return res.json({ has_command: false, latest_id: 0, mic_active: false, error: err.message });
+  }
+});
+
+// 5. Control Hardware Microphone Listener
+router.post('/listener-control', async (req: Request, res: Response) => {
+  try {
+    const isHealthy = await ensurePythonService();
+    if (isHealthy) {
+      const upstream = await fetch(`${PYTHON_SERVICE_URL}/voice_listener_control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body || {}),
+      });
+      if (upstream.ok) {
+        const data = await upstream.json();
+        return res.json(data);
+      }
+    }
+    return res.json({ success: false, mic_active: false });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;

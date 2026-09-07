@@ -238,8 +238,8 @@ router.post('/:id/enroll', authenticate, async (req: AuthenticatedRequest, res: 
     const courseId = req.params.id;
     const userId = req.user!.userId;
 
-    if (req.user?.role === UserRole.TRAINER) {
-      res.status(403).json({ error: 'Trainers are instructors and cannot enroll as trainees. Use Trainer Studio to author and manage courses.' });
+    if (req.user?.role === UserRole.ADMIN || req.user?.role === UserRole.TRAINER) {
+      res.status(403).json({ error: 'Administrative and Trainer accounts cannot enroll as trainees. Administrators oversee and publish courses from the Central Admin Console.' });
       return;
     }
 

@@ -623,7 +623,120 @@ def transcribe_audio_stream(audio_bytes: bytes, language: str = "en-IN") -> Dict
 
 
 # =============================================================================
-# 3. FLASK HTTP & STREAMING APPLICATION
+# 3. BACKGROUND HARDWARE MICROPHONE LISTENER
+# =============================================================================
+
+class PythonBackgroundMicListener:
+    """
+    Continuous background listener for the physical hardware microphone.
+    Directly binds to Windows Realtek audio capture via PyAudio and SpeechRecognition.
+    Transcribes recognized voice commands and maintains a thread-safe event queue
+    for continuous web navigation and dictation without browser permission deadlocks.
+    """
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.running = False
+        self.thread = None
+        self.last_event = None
+        self.event_counter = 0
+        self.mic_error = None
+
+    def start(self):
+        if self.running or sr is None:
+            return
+        self.running = True
+        self.thread = threading.Thread(target=self._listen_loop, daemon=True)
+        self.thread.start()
+        print("[Voice Listener] Background hardware microphone listener started.")
+
+    def stop(self):
+        self.running = False
+        print("[Voice Listener] Background microphone listener paused.")
+
+    def push_event(self, transcript: str, source: str = "upload"):
+        """Pushes an event into the polling queue (e.g. from web Push-to-Talk)."""
+        if not transcript:
+            return
+        cmd = parse_voice_command(transcript)
+        with self.lock:
+            self.event_counter += 1
+            self.last_event = {
+                "id": self.event_counter,
+                "transcript": transcript,
+                "command": cmd,
+                "timestamp": time.time(),
+                "source": source
+            }
+        print(f"[Voice Listener] Pushed event #{self.event_counter}: '{transcript}' -> {cmd.get('action')}")
+
+    def _listen_loop(self):
+        rec = sr.Recognizer()
+        rec.energy_threshold = 280
+        rec.dynamic_energy_threshold = True
+        rec.pause_threshold = 0.7
+        rec.non_speaking_duration = 0.4
+
+        try:
+            mic = sr.Microphone()
+        except Exception as e:
+            self.mic_error = str(e)
+            print(f"[Voice Listener Error] Could not initialize physical microphone: {e}")
+            self.running = False
+            return
+
+        while self.running:
+            try:
+                with mic as source:
+                    rec.adjust_for_ambient_noise(source, duration=0.6)
+                    while self.running:
+                        try:
+                            # Listen for phrase with non-blocking timeout
+                            audio = rec.listen(source, timeout=2.5, phrase_time_limit=5.5)
+                            if not audio:
+                                continue
+
+                            # Recognize speech across supported Indian accents
+                            text = ""
+                            for lang in ["en-IN", "en-US", "hi-IN"]:
+                                try:
+                                    text = rec.recognize_google(audio, language=lang)
+                                    if text and text.strip():
+                                        break
+                                except sr.UnknownValueError:
+                                    continue
+                                except sr.RequestError as req_err:
+                                    print(f"[Voice Listener] Google API request error: {req_err}")
+                                    break
+                                except Exception:
+                                    continue
+
+                            if text and text.strip():
+                                text = text.strip()
+                                print(f"[Voice Listener] Direct Hardware Mic Heard: '{text}'")
+                                cmd = parse_voice_command(text)
+                                with self.lock:
+                                    self.event_counter += 1
+                                    self.last_event = {
+                                        "id": self.event_counter,
+                                        "transcript": text,
+                                        "command": cmd,
+                                        "timestamp": time.time(),
+                                        "source": "python_hardware_mic"
+                                    }
+                        except sr.WaitTimeoutError:
+                            continue
+                        except Exception as inner_e:
+                            time.sleep(0.3)
+            except Exception as outer_e:
+                print(f"[Voice Listener] Mic stream loop exception: {outer_e}")
+                time.sleep(1.0)
+
+# Global microphone listener instance
+mic_listener = PythonBackgroundMicListener()
+
+
+# =============================================================================
+# 4. FLASK HTTP & STREAMING APPLICATION
 # =============================================================================
 
 app = Flask(__name__)
@@ -644,10 +757,13 @@ def health():
         "service": "IMD Capacity Connect Unified AI Service",
         "modules": {
             "camera_proctoring": "OpenCV 4.14 Hardware & AI Vision",
-            "speech_recognition": "SpeechRecognition Google Web Speech API"
+            "speech_recognition": "SpeechRecognition Google Web Speech API",
+            "hardware_microphone": "Online" if mic_listener.running else "Paused"
         },
         "version": "2.0.0",
-        "languages": ["en-IN", "en-US", "hi-IN"]
+        "languages": ["en-IN", "en-US", "hi-IN"],
+        "mic_active": mic_listener.running,
+        "latest_voice_id": mic_listener.event_counter
     })
 
 # --- CAMERA STREAMING & STATUS ---
@@ -748,8 +864,64 @@ def transcribe_endpoint():
         return jsonify({"success": False, "error": "No audio payload provided in request."}), 400
 
     result = transcribe_audio_stream(audio_bytes, language=language)
+    if result.get("success") and result.get("transcript"):
+        mic_listener.push_event(result["transcript"], source="web_transcribe_upload")
     status_code = 200 if result.get("success") else 422
     return jsonify(result), status_code
+
+@app.route("/voice_poll", methods=["GET"])
+def voice_poll_endpoint():
+    """Returns the latest recognized voice event if newer than ?since=<id>."""
+    try:
+        since_id = int(request.args.get("since", 0))
+    except (TypeError, ValueError):
+        since_id = 0
+
+    with mic_listener.lock:
+        last = dict(mic_listener.last_event) if mic_listener.last_event else None
+        current_id = mic_listener.event_counter
+
+    # If new event exists within the last 15 seconds
+    if last and last["id"] > since_id and (time.time() - last["timestamp"] < 15.0):
+        return jsonify({
+            "has_command": True,
+            "event": last,
+            "latest_id": current_id,
+            "mic_active": mic_listener.running,
+            "error": mic_listener.mic_error
+        })
+    return jsonify({
+        "has_command": False,
+        "latest_id": current_id,
+        "mic_active": mic_listener.running,
+        "error": mic_listener.mic_error
+    })
+
+@app.route("/voice_listener_control", methods=["POST", "OPTIONS"])
+def voice_listener_control_endpoint():
+    """Starts, stops, or checks status of the hardware microphone listener."""
+    if request.method == "OPTIONS":
+        return "", 204
+
+    data = request.get_json(silent=True) or {}
+    action = data.get("action", "status")
+
+    if action == "start":
+        mic_listener.start()
+    elif action == "stop":
+        mic_listener.stop()
+    elif action == "toggle":
+        if mic_listener.running:
+            mic_listener.stop()
+        else:
+            mic_listener.start()
+
+    return jsonify({
+        "success": True,
+        "mic_active": mic_listener.running,
+        "latest_id": mic_listener.event_counter,
+        "error": mic_listener.mic_error
+    })
 
 @app.route("/command", methods=["POST", "OPTIONS"])
 def command_endpoint():
@@ -778,6 +950,7 @@ def command_endpoint():
         return jsonify({"success": False, "error": "No text provided for command parsing."}), 400
 
     parsed = parse_voice_command(text)
+    mic_listener.push_event(text, source="command_endpoint")
     return jsonify({
         "success": True,
         "transcript": text,
@@ -812,11 +985,16 @@ def main():
     print("[Service] Starting threaded OpenCV camera loop...")
     camera_manager.start()
 
+    # Start background Python physical microphone listener
+    print("[Service] Starting background physical microphone listener...")
+    mic_listener.start()
+
     print(f"============================================================")
     print(f"IMD Python Unified Vision & Voice Service on http://{args.host}:{args.port}")
     print(f"1. OpenCV Video Stream: http://{args.host}:{args.port}/video_feed")
     print(f"2. OpenCV Camera Status: http://{args.host}:{args.port}/camera_status")
     print(f"3. Voice Recognition: http://{args.host}:{args.port}/transcribe")
+    print(f"4. Background Voice Poll: http://{args.host}:{args.port}/voice_poll")
     print(f"============================================================")
     app.run(host=args.host, port=args.port, debug=False, threaded=True)
 

@@ -14,6 +14,7 @@ import {
   Video,
   ArrowLeft,
   ChevronRight,
+  ShieldCheck,
 } from 'lucide-react';
 import { Course } from '../../types';
 
@@ -172,9 +173,32 @@ export const CourseDetailPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Enrollment Action Box */}
+            {/* Enrollment / Admin Action Box */}
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 min-w-[280px] text-center">
-              {user?.role === 'TRAINER' ? (
+              {user?.role === 'ADMIN' ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-center gap-2 text-purple-700 font-bold text-sm">
+                    <ShieldCheck className="w-5 h-5" />
+                    <span>Admin Central Oversight</span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    You are logged in as an <strong>IMD HQ Administrator</strong>. Course enrollment and examination attempts are strictly reserved for Trainees.
+                  </p>
+                  <Link
+                    to={`/courses/${course.id}/study`}
+                    className="w-full py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs flex items-center justify-center gap-2 transition shadow-md shadow-purple-600/30"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>Inspect Course & Lesson Notes</span>
+                  </Link>
+                  <Link
+                    to="/admin"
+                    className="w-full py-2 px-3 rounded-lg border border-purple-200 hover:bg-purple-50 text-purple-700 text-xs font-medium transition block text-center"
+                  >
+                    Return to Admin Console
+                  </Link>
+                </div>
+              ) : user?.role === 'TRAINER' ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-center gap-2 text-indigo-700 font-bold text-sm">
                     <BookOpen className="w-5 h-5" />
@@ -293,8 +317,8 @@ export const CourseDetailPage: React.FC = () => {
                     <h3 className="text-base font-bold text-slate-900">{lesson.title}</h3>
                   </div>
 
-                  {isEnrolled && (
-                    <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    {(isEnrolled || user?.role === 'ADMIN' || user?.role === 'TRAINER') && (
                       <Link
                         to={`/courses/${course.id}/study`}
                         className="py-1.5 px-3 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold flex items-center gap-1 transition"
@@ -302,18 +326,24 @@ export const CourseDetailPage: React.FC = () => {
                         <Play className="w-3.5 h-3.5" />
                         <span>View Notes & Video</span>
                       </Link>
+                    )}
 
-                      {lesson.assessments && lesson.assessments.length > 0 && (
-                        <Link
-                          to={`/assessments/${lesson.assessments[0].id}`}
-                          className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1 transition shadow-sm"
-                        >
-                          <Award className="w-3.5 h-3.5" />
-                          <span>Take Assessment</span>
-                        </Link>
-                      )}
-                    </div>
-                  )}
+                    {isEnrolled && user?.role === 'TRAINEE' && lesson.assessments && lesson.assessments.length > 0 && (
+                      <Link
+                        to={`/assessments/${lesson.assessments[0].id}`}
+                        className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1 transition shadow-sm"
+                      >
+                        <Award className="w-3.5 h-3.5" />
+                        <span>Take Assessment</span>
+                      </Link>
+                    )}
+
+                    {user?.role === 'ADMIN' && lesson.assessments && lesson.assessments.length > 0 && (
+                      <span className="py-1 px-2.5 rounded-lg bg-purple-50 border border-purple-200 text-purple-800 text-[11px] font-mono font-medium">
+                        Assessment: {lesson.assessments[0].title}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {lesson.description && (
