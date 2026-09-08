@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../prisma.js';
+import { supabase, isSupabaseConfigured } from '../services/supabaseClient.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { UserRole, ApprovalStatus } from '../types/index.js';
 
@@ -49,6 +50,34 @@ router.post('/signup', async (req, res): Promise<void> => {
       },
       include: { profile: true },
     });
+
+    // Also mirror directly to Supabase User and Profile tables if Supabase is configured
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('User').upsert({
+          id: user.id,
+          email: user.email,
+          passwordHash: user.passwordHash,
+          role: user.role,
+          requestedRole: user.requestedRole,
+          approvalStatus: user.approvalStatus,
+        }, { onConflict: 'email' });
+
+        if (user.profile) {
+          await supabase.from('Profile').upsert({
+            id: user.profile.id,
+            userId: user.id,
+            fullName: user.profile.fullName,
+            jobDesignation: user.profile.jobDesignation,
+            department: user.profile.department,
+            qualifications: user.profile.qualifications,
+            skills: user.profile.skills,
+          }, { onConflict: 'id' });
+        }
+      } catch (supaErr: any) {
+        console.warn('[Supabase Sync Warning]:', supaErr?.message || supaErr);
+      }
+    }
 
     res.status(201).json({
       message: 'Registration successful. Account is pending administrative approval.',

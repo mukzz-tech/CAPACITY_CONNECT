@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../prisma.js';
+import { supabase, isSupabaseConfigured } from '../services/supabaseClient.js';
 import { authenticate, requireRole, AuthenticatedRequest } from '../middleware/auth.js';
 import { UserRole, ApprovalStatus, CourseStatus } from '../types/index.js';
 
@@ -51,6 +52,18 @@ router.post('/approve-user', authenticate, requireRole([UserRole.ADMIN]), async 
         notes: notes || `Admin set status to ${newStatus} with role ${finalRole}`,
       },
     });
+
+    // Also sync updated user status and role to Supabase User table
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('User').update({
+          approvalStatus: newStatus,
+          role: finalRole,
+        }).eq('id', targetUserId);
+      } catch (supaErr: any) {
+        console.warn('[Supabase Sync Warning]:', supaErr?.message || supaErr);
+      }
+    }
 
     res.json({
       message: `User ${action.toLowerCase()}d successfully`,

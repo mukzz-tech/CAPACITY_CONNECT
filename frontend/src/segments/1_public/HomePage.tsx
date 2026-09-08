@@ -27,11 +27,11 @@ export const HomePage: React.FC = () => {
 
   useEffect(() => {
     fetch('/api/admin/announcements')
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : { announcements: [] }))
       .then((data) => {
-        if (data.announcements) setAnnouncements(data.announcements);
+        if (data && Array.isArray(data.announcements)) setAnnouncements(data.announcements);
       })
-      .catch((e) => console.warn(e));
+      .catch((e) => console.warn('Announcements fetch warning:', e));
   }, []);
 
   const coursesSummary = [
