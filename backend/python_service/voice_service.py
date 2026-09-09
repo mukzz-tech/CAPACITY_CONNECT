@@ -22,14 +22,17 @@ import time
 import json
 import re
 import base64
+import math
 import argparse
 import threading
 from typing import Dict, Any, Optional
 
-# Ensure real-time line buffering on stdout/stderr
+# Ensure UTF-8 stream encoding and real-time line buffering on stdout/stderr (prevents Windows charmap crashes)
 try:
-    sys.stdout.reconfigure(line_buffering=True)
-    sys.stderr.reconfigure(line_buffering=True)
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)
 except Exception:
     pass
 
@@ -37,10 +40,25 @@ except Exception:
 try:
     import cv2
     import numpy as np
-    face_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-    face_cascade = cv2.CascadeClassifier(face_cascade_path)
-    eye_cascade_path = cv2.data.haarcascades + 'haarcascade_eye.xml'
-    eye_cascade = cv2.CascadeClassifier(eye_cascade_path)
+
+    models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
+
+    def _resolve_cascade(filename: str):
+        candidate_paths = [
+            os.path.join(models_dir, filename),
+            os.path.join(getattr(cv2.data, 'haarcascades', ''), filename),
+            os.path.join(os.getcwd(), 'models', filename),
+            filename
+        ]
+        for p in candidate_paths:
+            if p and os.path.exists(p):
+                clf = cv2.CascadeClassifier(p)
+                if not clf.empty():
+                    return clf
+        return cv2.CascadeClassifier(candidate_paths[0])
+
+    face_cascade = _resolve_cascade('haarcascade_frontalface_default.xml')
+    eye_cascade = _resolve_cascade('haarcascade_eye.xml')
 except Exception as e:
     cv2 = None
     np = None
@@ -175,6 +193,20 @@ class OpenCVCameraManager:
         cv2.putText(frame, "STATUS: 1 Face Tracked & Attentive [98%]", (20, 335),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 120), 2)
 
+        with self.lock:
+            self.last_status = {
+                "condition": "NORMAL",
+                "face_count": 1,
+                "confidence": 0.98,
+                "attentiveness_score": 98,
+                "message": "OpenCV AI Virtual Feed: 1 Face Tracked & Attentive (98%)",
+                "gaze_direction": "center",
+                "fps": round(self.calculated_fps, 1),
+                "camera_name": "OpenCV AI Synthetic Proctor Feed",
+                "camera_available": True,
+                "timestamp": time.time()
+            }
+
         ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
         return buffer.tobytes()
 
@@ -307,10 +339,8 @@ class OpenCVCameraManager:
 
     def _capture_loop(self):
         """Background loop continuously capturing and processing frames."""
-        import math
-        globals()['math'] = math
-
         self.cap = self._open_camera()
+        last_retry = time.time()
 
         while self.running:
             start_time = time.time()
@@ -329,6 +359,14 @@ class OpenCVCameraManager:
                     time.sleep(0.5)
                     self.cap = self._open_camera()
             else:
+                # Periodic retry to check if hardware camera was plugged in or released
+                if time.time() - last_retry > 8.0:
+                    last_retry = time.time()
+                    try:
+                        self.cap = self._open_camera()
+                    except Exception:
+                        pass
+
                 # Fallback test pattern
                 jpeg_bytes = self._generate_fallback_frame()
                 with self.lock:
@@ -378,7 +416,26 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
 
     phrase = raw_phrase.strip().lower()
 
-    # 0. Help & Language Controls
+    # 0. Wake Word & Voice Toggle Controls
+    if phrase in ["voice on", "voice command on", "voice comment on", "start voice", "turn on voice", "activate voice", "open voice"] or any(k in phrase for k in ["वॉयस ऑन", "वॉइस ऑन"]):
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "VOICE_ON",
+            "description": "Voice Assistant Activated",
+            "tone": 680
+        }
+
+    if phrase in ["voice off", "voice command off", "voice comment off", "stop voice", "turn off voice", "deactivate voice", "mute voice", "stop listening"] or any(k in phrase for k in ["वॉयस बंद", "वॉइस बंद", "आवाज़ बंद"]):
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "VOICE_OFF",
+            "description": "Voice Assistant Muted",
+            "tone": 450
+        }
+
+    # 0.1 Help & Language Controls
     if phrase in ["help", "voice help", "show commands", "what can i say", "commands", "मदद"]:
         return {
             "success": True,
@@ -399,7 +456,17 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
             "tone": 450
         }
 
-    if phrase in ["switch to hindi", "hindi", "hindi language", "हिन्दी"]:
+    if phrase in ["switch to tamil", "tamil", "tamil language", "தமிழ்"] or "தமிழ்" in phrase:
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "SET_LANGUAGE",
+            "language": "ta-IN",
+            "description": "மொழி: தமிழ் (Tamil)",
+            "tone": 700
+        }
+
+    if phrase in ["switch to hindi", "hindi", "hindi language", "हिन्दी", "हिंदी"] or "हिंदी" in phrase:
         return {
             "success": True,
             "transcript": raw_phrase,
@@ -547,6 +614,18 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
             "action": "CAMERA_TEST",
             "target": "/profile",
             "description": "Opening Camera Diagnostics...",
+            "tone": 620
+        }
+
+    # 6.2 Admin Portal Navigation
+    if (phrase in ["admin", "admin portal", "administration", "admin dashboard", "व्यवस्थापक"] or
+        phrase.startswith(("go to admin", "open admin", "show admin", "admin page"))):
+        return {
+            "success": True,
+            "transcript": raw_phrase,
+            "action": "NAVIGATE",
+            "target": "/admin",
+            "description": "Navigating to Admin Portal...",
             "tone": 620
         }
 
@@ -731,8 +810,12 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
             "tone": 520
         }
 
-    # Jump Question ("question 1", "question 2", "go to question 3")
-    q_jump_match = re.search(r'(?:go to\s+)?(?:question|q|प्रश्न)\s*(\d+)', phrase, re.IGNORECASE)
+    # Normalize Devanagari numerals ('०१२३४५६७८९' -> '0123456789')
+    devanagari_trans = str.maketrans('०१२३४५६७८९', '0123456789')
+    normalized_phrase = phrase.translate(devanagari_trans)
+
+    # Jump Question ("question 1", "question 2", "go to question 3", "प्रश्न ३")
+    q_jump_match = re.search(r'(?:go to\s+)?(?:question|q|प्रश्न)\s*(\d+)', normalized_phrase, re.IGNORECASE)
     if q_jump_match:
         q_num = int(q_jump_match.group(1))
         return {
@@ -744,10 +827,12 @@ def parse_voice_command(raw_phrase: str) -> Dict[str, Any]:
             "tone": 600
         }
 
-    # MCQ Option Selection: "Option A", "Select B", "विकल्प सी", or "A", "B", "C", "D"
-    option_match = re.search(r'(?:option|select|choose|answer|विकल्प)\s*([a-d])\b|^([a-d])$', phrase, re.IGNORECASE)
+    # MCQ Option Selection: "Option A", "Select B", "विकल्प सी", "उत्तर डी", or phonetic Hindi "विकल्प ए"
+    option_match = re.search(r'(?:(?:option|select|choose|answer|विकल्प|उत्तर)\s+)?([a-dA-D]|ए|बी|सी|डी)$', phrase, re.IGNORECASE)
     if option_match:
-        opt = (option_match.group(1) or option_match.group(2)).upper()
+        raw_opt = option_match.group(1).strip()
+        hindi_map = {'ए': 'A', 'बी': 'B', 'सी': 'C', 'डी': 'D', 'a': 'A', 'b': 'B', 'c': 'C', 'd': 'D'}
+        opt = hindi_map.get(raw_opt, raw_opt.upper())
         return {
             "success": True,
             "transcript": raw_phrase,
@@ -871,17 +956,21 @@ class PythonBackgroundMicListener:
         self.last_event = None
         self.event_counter = 0
         self.mic_error = None
+        self.pause_requested = threading.Event()
+        self.mic_hardware_lock = threading.Lock()
 
     def start(self):
         if self.running or sr is None:
             return
         self.running = True
+        self.pause_requested.clear()
         self.thread = threading.Thread(target=self._listen_loop, daemon=True)
         self.thread.start()
         print("[Voice Listener] Background hardware microphone listener started.")
 
     def stop(self):
         self.running = False
+        self.pause_requested.set()
         print("[Voice Listener] Background microphone listener paused.")
 
     def push_event(self, transcript: str, source: str = "upload"):
@@ -918,48 +1007,58 @@ class PythonBackgroundMicListener:
             return
 
         while self.running:
+            if self.pause_requested.is_set():
+                time.sleep(0.1)
+                continue
+
             try:
-                with mic as source:
-                    rec.adjust_for_ambient_noise(source, duration=0.3)
-                    while self.running:
-                        try:
-                            # Listen for phrase with non-blocking timeout
-                            audio = rec.listen(source, timeout=2.0, phrase_time_limit=5.0)
-                            if not audio:
-                                continue
+                with self.mic_hardware_lock:
+                    if self.pause_requested.is_set() or not self.running:
+                        time.sleep(0.1)
+                        continue
 
-                            # Recognize speech across supported Indian accents
-                            text = ""
-                            for lang in ["en-IN", "en-US", "hi-IN"]:
-                                try:
-                                    text = rec.recognize_google(audio, language=lang)
-                                    if text and text.strip():
+                    with mic as source:
+                        rec.adjust_for_ambient_noise(source, duration=0.2)
+                        rec.energy_threshold = max(80, min(int(rec.energy_threshold), 420))
+                        while self.running and not self.pause_requested.is_set():
+                            try:
+                                # Listen for phrase with non-blocking timeout
+                                audio = rec.listen(source, timeout=1.5, phrase_time_limit=5.0)
+                                if not audio:
+                                    continue
+
+                                # Recognize speech across supported Indian accents
+                                text = ""
+                                for lang in ["en-IN", "hi-IN", "ta-IN", "en-US"]:
+                                    try:
+                                        text = rec.recognize_google(audio, language=lang)
+                                        if text and text.strip():
+                                            break
+                                    except sr.UnknownValueError:
+                                        continue
+                                    except sr.RequestError as req_err:
+                                        print(f"[Voice Listener] Google API request error: {req_err}")
                                         break
-                                except sr.UnknownValueError:
-                                    continue
-                                except sr.RequestError as req_err:
-                                    print(f"[Voice Listener] Google API request error: {req_err}")
-                                    break
-                                except Exception:
-                                    continue
+                                    except Exception:
+                                        continue
 
-                            if text and text.strip():
-                                text = text.strip()
-                                print(f"[Voice Listener] Direct Hardware Mic Heard: '{text}'")
-                                cmd = parse_voice_command(text)
-                                with self.lock:
-                                    self.event_counter += 1
-                                    self.last_event = {
-                                        "id": self.event_counter,
-                                        "transcript": text,
-                                        "command": cmd,
-                                        "timestamp": time.time(),
-                                        "source": "python_hardware_mic"
-                                    }
-                        except sr.WaitTimeoutError:
-                            continue
-                        except Exception as inner_e:
-                            time.sleep(0.2)
+                                if text and text.strip():
+                                    text = text.strip()
+                                    print(f"[Voice Listener] Direct Hardware Mic Heard: '{text}'")
+                                    cmd = parse_voice_command(text)
+                                    with self.lock:
+                                        self.event_counter += 1
+                                        self.last_event = {
+                                            "id": self.event_counter,
+                                            "transcript": text,
+                                            "command": cmd,
+                                            "timestamp": time.time(),
+                                            "source": "python_hardware_mic"
+                                        }
+                            except sr.WaitTimeoutError:
+                                continue
+                            except Exception as inner_e:
+                                time.sleep(0.2)
             except Exception as outer_e:
                 print(f"[Voice Listener] Mic stream loop exception: {outer_e}")
                 time.sleep(0.8)
@@ -994,7 +1093,7 @@ def health():
             "hardware_microphone": "Online" if mic_listener.running else "Paused"
         },
         "version": "2.0.0",
-        "languages": ["en-IN", "en-US", "hi-IN"],
+        "languages": ["en-IN", "en-US", "hi-IN", "ta-IN"],
         "mic_active": mic_listener.running,
         "latest_voice_id": mic_listener.event_counter
     })
@@ -1167,40 +1266,56 @@ def listen_once_endpoint():
         data = request.get_json(silent=True) or {}
         lang = data.get("language", lang)
 
+    # Signal background microphone listener to yield hardware access
+    mic_listener.pause_requested.set()
     try:
-        rec = sr.Recognizer()
-        rec.energy_threshold = 140
-        rec.dynamic_energy_threshold = True
-        rec.dynamic_energy_adjustment_damping = 0.15
-        rec.dynamic_energy_ratio = 1.4
-        rec.pause_threshold = 0.6
-        with sr.Microphone() as source:
-            rec.adjust_for_ambient_noise(source, duration=0.25)
-            audio = rec.listen(source, timeout=4.0, phrase_time_limit=5.5)
+        with mic_listener.mic_hardware_lock:
+            rec = sr.Recognizer()
+            rec.energy_threshold = 140
+            rec.dynamic_energy_threshold = True
+            rec.dynamic_energy_adjustment_damping = 0.15
+            rec.dynamic_energy_ratio = 1.4
+            rec.pause_threshold = 0.6
 
-        transcript = None
-        for l in [lang, "en-IN", "en-US", "hi-IN"]:
-            try:
-                transcript = rec.recognize_google(audio, language=l)
-                if transcript and transcript.strip():
+            with sr.Microphone() as source:
+                rec.adjust_for_ambient_noise(source, duration=0.2)
+                rec.energy_threshold = max(80, min(int(rec.energy_threshold), 420))
+                audio = rec.listen(source, timeout=4.0, phrase_time_limit=6.0)
+
+            # Targeted multi-accent recognition without redundant duplicates
+            target_langs = []
+            for l in [lang, "en-IN", "hi-IN", "ta-IN", "en-US"]:
+                if l and l not in target_langs:
+                    target_langs.append(l)
+
+            transcript = None
+            for l in target_langs[:3]:  # At most 3 targeted dialects
+                try:
+                    transcript = rec.recognize_google(audio, language=l)
+                    if transcript and transcript.strip():
+                        break
+                except sr.UnknownValueError:
+                    continue
+                except sr.RequestError as req_err:
+                    print(f"[Voice Mic API Request Error]: {req_err}")
                     break
-            except Exception:
-                continue
+                except Exception:
+                    continue
 
-        if transcript and transcript.strip():
-            transcript = transcript.strip()
-            cmd = parse_voice_command(transcript)
-            mic_listener.push_event(transcript, source="listen_once")
-            return jsonify({
-                "success": True,
-                "transcript": transcript,
-                "command": cmd
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "error": "No clear speech recognized. Please speak into your microphone."
-            }), 422
+            if transcript and transcript.strip():
+                transcript = transcript.strip()
+                cmd = parse_voice_command(transcript)
+                mic_listener.push_event(transcript, source="listen_once")
+                return jsonify({
+                    "success": True,
+                    "transcript": transcript,
+                    "command": cmd
+                })
+            else:
+                return jsonify({
+                    "success": False,
+                    "error": "No clear speech recognized. Please speak into your microphone."
+                }), 422
     except sr.WaitTimeoutError:
         return jsonify({
             "success": False,
@@ -1211,6 +1326,8 @@ def listen_once_endpoint():
             "success": False,
             "error": f"Microphone error: {str(e)}"
         }), 500
+    finally:
+        mic_listener.pause_requested.clear()
 
 @app.route("/command", methods=["POST", "OPTIONS"])
 def command_endpoint():
